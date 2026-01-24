@@ -1,0 +1,27 @@
+# Node modules
+node_modules/
+package-lock.json
+
+# Web-ext artifacts
+web-ext-artifacts/
+
+# Build artifacts
+*.zip
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Temporary files
+*.tmp
+*.log
+
+# Firefox profiles (created during testing)
+firefox-profile/

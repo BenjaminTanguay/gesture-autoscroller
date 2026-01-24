@@ -1,0 +1,774 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Gesture AutoScroller - Settings</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+      background: #f5f5f5;
+      color: #333;
+      padding: 20px;
+      line-height: 1.6;
+    }
+
+    .container {
+      max-width: 800px;
+      margin: 0 auto;
+      background: white;
+      border-radius: 8px;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+      overflow: hidden;
+    }
+
+    header {
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
+      padding: 24px;
+      text-align: center;
+    }
+
+    header h1 {
+      font-size: 24px;
+      font-weight: 600;
+      margin-bottom: 4px;
+    }
+
+    header p {
+      font-size: 14px;
+      opacity: 0.9;
+    }
+
+    .content {
+      padding: 24px;
+    }
+
+    .section {
+      margin-bottom: 32px;
+    }
+
+    .section:last-child {
+      margin-bottom: 0;
+    }
+
+    .section-title {
+      font-size: 18px;
+      font-weight: 600;
+      color: #667eea;
+      margin-bottom: 16px;
+      padding-bottom: 8px;
+      border-bottom: 2px solid #e0e0e0;
+    }
+
+    .setting-group {
+      margin-bottom: 20px;
+    }
+
+    .setting-group:last-child {
+      margin-bottom: 0;
+    }
+
+    .checkbox-group {
+      display: flex;
+      align-items: center;
+      padding: 12px;
+      background: #f9f9f9;
+      border-radius: 6px;
+      margin-bottom: 12px;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+
+    .checkbox-group:hover {
+      background: #f0f0f0;
+    }
+
+    .checkbox-group input[type="checkbox"] {
+      width: 20px;
+      height: 20px;
+      margin-right: 12px;
+      cursor: pointer;
+      accent-color: #667eea;
+    }
+
+    .checkbox-group label {
+      flex: 1;
+      cursor: pointer;
+      font-size: 15px;
+    }
+
+    .slider-group {
+      margin-bottom: 20px;
+    }
+
+    .slider-label {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 8px;
+      font-size: 14px;
+      font-weight: 500;
+    }
+
+    .slider-value {
+      background: #667eea;
+      color: white;
+      padding: 2px 10px;
+      border-radius: 12px;
+      font-size: 13px;
+      font-weight: 600;
+      min-width: 50px;
+      text-align: center;
+    }
+
+    input[type="range"] {
+      width: 100%;
+      height: 6px;
+      border-radius: 3px;
+      background: #e0e0e0;
+      outline: none;
+      cursor: pointer;
+      -webkit-appearance: none;
+    }
+
+    input[type="range"]::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      appearance: none;
+      width: 18px;
+      height: 18px;
+      border-radius: 50%;
+      background: #667eea;
+      cursor: pointer;
+      box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+      transition: transform 0.1s;
+    }
+
+    input[type="range"]::-webkit-slider-thumb:hover {
+      transform: scale(1.1);
+    }
+
+    input[type="range"]::-moz-range-thumb {
+      width: 18px;
+      height: 18px;
+      border-radius: 50%;
+      background: #667eea;
+      cursor: pointer;
+      border: none;
+      box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+      transition: transform 0.1s;
+    }
+
+    input[type="range"]::-moz-range-thumb:hover {
+      transform: scale(1.1);
+    }
+
+    .slider-hint {
+      font-size: 12px;
+      color: #666;
+      margin-top: 4px;
+    }
+
+    .whitelist-section {
+      background: #f9f9f9;
+      border-radius: 6px;
+      padding: 16px;
+    }
+
+    .whitelist-list {
+      margin-bottom: 16px;
+      min-height: 100px;
+      max-height: 300px;
+      overflow-y: auto;
+      border: 1px solid #e0e0e0;
+      border-radius: 4px;
+      background: white;
+    }
+
+    .whitelist-item {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 10px 12px;
+      border-bottom: 1px solid #f0f0f0;
+    }
+
+    .whitelist-item:last-child {
+      border-bottom: none;
+    }
+
+    .whitelist-item:hover {
+      background: #f9f9f9;
+    }
+
+    .whitelist-item-host {
+      flex: 1;
+      font-size: 14px;
+      font-family: 'Courier New', monospace;
+    }
+
+    .whitelist-item-remove {
+      background: #ff5252;
+      color: white;
+      border: none;
+      padding: 4px 12px;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 12px;
+      font-weight: 600;
+      transition: background 0.2s;
+    }
+
+    .whitelist-item-remove:hover {
+      background: #e04848;
+    }
+
+    .whitelist-add {
+      display: flex;
+      gap: 8px;
+    }
+
+    .whitelist-add input {
+      flex: 1;
+      padding: 10px 12px;
+      border: 1px solid #e0e0e0;
+      border-radius: 4px;
+      font-size: 14px;
+      font-family: 'Courier New', monospace;
+    }
+
+    .whitelist-add input:focus {
+      outline: none;
+      border-color: #667eea;
+    }
+
+    .whitelist-add button {
+      background: #667eea;
+      color: white;
+      border: none;
+      padding: 10px 20px;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 14px;
+      font-weight: 600;
+      transition: background 0.2s;
+    }
+
+    .whitelist-add button:hover {
+      background: #5568d3;
+    }
+
+    .whitelist-add button:disabled {
+      background: #ccc;
+      cursor: not-allowed;
+    }
+
+    .whitelist-empty {
+      text-align: center;
+      padding: 40px 20px;
+      color: #999;
+      font-size: 14px;
+    }
+
+    .current-page-section {
+      background: #e8f4f8;
+      border: 1px solid #b3d9e6;
+      border-radius: 6px;
+      padding: 16px;
+      margin-bottom: 16px;
+    }
+
+    .current-page-title {
+      font-size: 14px;
+      font-weight: 600;
+      color: #0277bd;
+      margin-bottom: 8px;
+    }
+
+    .current-page-host {
+      font-family: 'Courier New', monospace;
+      font-size: 15px;
+      margin-bottom: 8px;
+      color: #333;
+    }
+
+    .current-page-status {
+      font-size: 13px;
+      color: #666;
+      margin-bottom: 12px;
+    }
+
+    .current-page-status.active {
+      color: #2e7d32;
+      font-weight: 600;
+    }
+
+    .current-page-status.inactive {
+      color: #d84315;
+      font-weight: 600;
+    }
+
+    .btn-add-current {
+      background: #0277bd;
+      color: white;
+      border: none;
+      padding: 8px 16px;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 13px;
+      font-weight: 600;
+      transition: background 0.2s;
+    }
+
+    .btn-add-current:hover {
+      background: #01579b;
+    }
+
+    .btn-add-current:disabled {
+      background: #ccc;
+      cursor: not-allowed;
+    }
+
+    .status-message {
+      position: fixed;
+      bottom: 20px;
+      right: 20px;
+      padding: 10px 20px;
+      border-radius: 20px;
+      font-size: 13px;
+      font-weight: 600;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+      z-index: 1000;
+      animation: slideInBottom 0.3s ease;
+      display: none;
+      opacity: 0.95;
+    }
+
+    .status-message.success {
+      background: #4caf50;
+      color: white;
+    }
+
+    .status-message.error {
+      background: #f44336;
+      color: white;
+    }
+
+    .status-message.show {
+      display: block;
+    }
+
+    @keyframes slideInBottom {
+      from {
+        transform: translateY(100px);
+        opacity: 0;
+      }
+      to {
+        transform: translateY(0);
+        opacity: 0.95;
+      }
+    }
+
+    .info-box {
+      background: #fff3cd;
+      border: 1px solid #ffc107;
+      border-radius: 6px;
+      padding: 12px;
+      margin-bottom: 16px;
+      font-size: 13px;
+      color: #856404;
+    }
+
+    .info-box strong {
+      font-weight: 600;
+    }
+
+    /* Tab Navigation */
+    .tabs {
+      display: flex;
+      background: #f5f5f5;
+      border-bottom: 2px solid #e0e0e0;
+    }
+
+    .tab {
+      flex: 1;
+      padding: 16px 24px;
+      text-align: center;
+      cursor: pointer;
+      font-size: 15px;
+      font-weight: 500;
+      color: #666;
+      background: transparent;
+      border: none;
+      border-bottom: 3px solid transparent;
+      transition: all 0.2s;
+    }
+
+    .tab:hover {
+      background: #f0f0f0;
+      color: #333;
+    }
+
+    .tab.active {
+      color: #667eea;
+      border-bottom-color: #667eea;
+      background: white;
+    }
+
+    .tab-content {
+      display: none;
+      padding: 24px;
+    }
+
+    .tab-content.active {
+      display: block;
+    }
+
+    /* Instructions Page Styles */
+    .instructions {
+      max-width: 100%;
+    }
+
+    .instructions h3 {
+      color: #667eea;
+      font-size: 20px;
+      margin: 24px 0 12px 0;
+      padding-bottom: 8px;
+      border-bottom: 2px solid #e0e0e0;
+    }
+
+    .instructions h3:first-child {
+      margin-top: 0;
+    }
+
+    .instructions h4 {
+      color: #333;
+      font-size: 16px;
+      margin: 16px 0 8px 0;
+    }
+
+    .instructions p {
+      margin-bottom: 12px;
+      line-height: 1.6;
+    }
+
+    .instructions ul, .instructions ol {
+      margin: 12px 0 12px 24px;
+      line-height: 1.8;
+    }
+
+    .instructions li {
+      margin-bottom: 8px;
+    }
+
+    .instructions code {
+      background: #f5f5f5;
+      padding: 2px 6px;
+      border-radius: 3px;
+      font-family: 'Courier New', monospace;
+      font-size: 13px;
+      color: #d63384;
+    }
+
+    .gesture-box {
+      background: #f9f9f9;
+      border: 1px solid #e0e0e0;
+      border-radius: 6px;
+      padding: 12px 16px;
+      margin: 12px 0;
+      font-size: 14px;
+    }
+
+    .gesture-box strong {
+      color: #667eea;
+      display: block;
+      margin-bottom: 4px;
+    }
+
+    .platform-badge {
+      display: inline-block;
+      background: #667eea;
+      color: white;
+      padding: 2px 8px;
+      border-radius: 12px;
+      font-size: 11px;
+      font-weight: 600;
+      margin-left: 8px;
+      text-transform: uppercase;
+    }
+
+    .platform-badge.desktop {
+      background: #0277bd;
+    }
+
+    .troubleshooting-item {
+      background: #fff3cd;
+      border-left: 4px solid #ffc107;
+      padding: 12px;
+      margin: 12px 0;
+    }
+
+    .troubleshooting-item strong {
+      color: #856404;
+      display: block;
+      margin-bottom: 4px;
+    }
+  
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>Gesture AutoScroller</h1>
+      <p>Configure your mobile reading experience</p>
+    </header>
+
+    <!-- Tab Navigation -->
+    <div class="tabs">
+      <button class="tab active" data-tab="settings">Settings</button>
+      <button class="tab" data-tab="instructions">Instructions</button>
+    </div>
+
+    <!-- Settings Tab -->
+    <div class="tab-content active" id="settingsTab">
+      <div class="content">
+      <!-- Feature Toggles -->
+      <section class="section">
+        <h2 class="section-title">Feature Toggles</h2>
+        <div class="setting-group">
+          <div class="checkbox-group" onclick="document.getElementById('tapNavigationEnabled').click()">
+            <input type="checkbox" id="tapNavigationEnabled">
+            <label for="tapNavigationEnabled">Enable tap to page up/down</label>
+          </div>
+          <div class="checkbox-group" onclick="document.getElementById('autoscrollEnabled').click()">
+            <input type="checkbox" id="autoscrollEnabled">
+            <label for="autoscrollEnabled">Enable gesture autoscroll</label>
+          </div>
+          <div class="checkbox-group" onclick="document.getElementById('autoStartEnabled').click()">
+            <input type="checkbox" id="autoStartEnabled">
+            <label for="autoStartEnabled">Auto-start scrolling on whitelisted pages</label>
+          </div>
+        </div>
+      </section>
+
+      <!-- Auto-Start Settings -->
+      <section class="section" id="autoStartSection">
+        <h2 class="section-title">Auto-Start Settings</h2>
+        <div class="info-box">
+          When enabled, autoscrolling will start automatically after the countdown on whitelisted pages.
+        </div>
+        <div class="setting-group">
+          <div class="slider-group">
+            <div class="slider-label">
+              <span>Auto-start Delay</span>
+              <span class="slider-value" id="autoStartDelayValue">3 seconds</span>
+            </div>
+            <input type="range" id="autoStartDelay" min="1" max="10" step="1" value="3">
+            <div class="slider-hint">Countdown duration before auto-starting (in seconds)</div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Autoscroll Speed Settings -->
+      <section class="section">
+        <h2 class="section-title">Autoscroll Speed Settings</h2>
+        <div class="setting-group">
+          <div class="slider-group">
+            <div class="slider-label">
+              <span>Speed</span>
+              <span class="slider-value" id="defaultSpeedValue">20 px/sec</span>
+            </div>
+            <input type="range" id="defaultSpeed" min="1" max="3000" step="1" value="20">
+            <div class="slider-hint">Scrolling speed (pixels per second)</div>
+          </div>
+
+          <div class="slider-group">
+            <div class="slider-label">
+              <span>Minimum Speed</span>
+              <span class="slider-value" id="minSpeedValue">1 px/sec</span>
+            </div>
+            <input type="range" id="minSpeed" min="1" max="500" step="1" value="1">
+            <div class="slider-hint">Lower bound for speed adjustment</div>
+          </div>
+
+          <div class="slider-group">
+            <div class="slider-label">
+              <span>Maximum Speed</span>
+              <span class="slider-value" id="maxSpeedValue">3000 px/sec</span>
+            </div>
+            <input type="range" id="maxSpeed" min="100" max="5000" step="10" value="3000">
+            <div class="slider-hint">Upper bound for speed adjustment</div>
+          </div>
+
+          <div class="slider-group">
+            <div class="slider-label">
+              <span>Granularity</span>
+              <span class="slider-value" id="granularityValue">10 px/sec</span>
+            </div>
+            <input type="range" id="granularity" min="1" max="100" step="1" value="10">
+            <div class="slider-hint">Amount each swipe changes the speed</div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Host Whitelist -->
+      <section class="section">
+        <h2 class="section-title">Active Hosts (Whitelist)</h2>
+        
+        <div class="info-box">
+          <strong>Note:</strong> The extension only works on whitelisted sites. Add your favorite reading sites below.
+        </div>
+
+        <div class="whitelist-section">
+          <!-- Current Page Info -->
+          <div class="current-page-section" id="currentPageSection" style="display: none;">
+            <div class="current-page-title">Current Page</div>
+            <div class="current-page-host" id="currentPageHost">example.com</div>
+            <div class="current-page-status" id="currentPageStatus">Not whitelisted</div>
+            <button class="btn-add-current" id="btnAddCurrent">Add current site to whitelist</button>
+          </div>
+
+          <!-- Whitelist -->
+          <div class="whitelist-list" id="whitelistList">
+            <div class="whitelist-empty">No sites added yet. Add your favorite reading sites below.</div>
+          </div>
+
+          <!-- Add Host Input -->
+          <div class="whitelist-add">
+            <input 
+              type="text" 
+              id="hostInput" 
+              placeholder="example.com"
+              autocomplete="off"
+            >
+            <button id="btnAddHost">Add Host</button>
+          </div>
+        </div>
+      </section>
+    </div>
+  </div>
+
+  <!-- Instructions Tab -->
+  <div class="tab-content" id="instructionsTab">
+    <div class="instructions">
+      <h3>Getting Started</h3>
+      <p>Gesture AutoScroller provides hands-free reading through simple gestures. The extension only works on sites you've added to the whitelist.</p>
+      
+      <div class="gesture-box">
+        <strong>Quick Tip: 3-Finger Tap <span class="platform-badge">Mobile</span></strong>
+        Tap with 3 fingers anywhere on the page to quickly enable/disable the extension for the current site. This is the fastest way to add sites to your whitelist!
+      </div>
+
+      <h3>Activation Gestures</h3>
+      
+      <h4>Mobile <span class="platform-badge">Mobile</span></h4>
+      <div class="gesture-box">
+        <strong>Two-Finger Tap</strong>
+        Tap simultaneously with two fingers anywhere on the page to activate autoscroll.
+      </div>
+      
+      <div class="gesture-box">
+        <strong>Three-Finger Tap</strong>
+        Tap with three fingers to add/remove the current site from your whitelist. A toast message will confirm the action.
+      </div>
+
+      <h4>Desktop <span class="platform-badge desktop">Desktop</span></h4>
+      <div class="gesture-box">
+        <strong>Scroll Down</strong>
+        Simply scroll down with your mouse wheel or trackpad to activate autoscroll. Works from any position on the page.
+      </div>
+
+      <h3>Autoscroll Controls</h3>
+      
+      <h4>Speed Adjustment</h4>
+      <ul>
+        <li><strong>Swipe Up:</strong> Increase scrolling speed (works continuously - keep swiping for faster speed)</li>
+        <li><strong>Swipe Down:</strong> Decrease scrolling speed (works continuously)</li>
+      </ul>
+      <p>Speed adjustments work in both SCROLLING and PAUSED states. Changes take effect immediately.</p>
+
+      <h4>Pause/Resume</h4>
+      <div class="gesture-box">
+        <strong>Single Tap</strong>
+        Tap anywhere on the page to pause scrolling. Tap again to resume from the same position.
+      </div>
+
+      <h4>Stop Autoscroll</h4>
+      <div class="gesture-box">
+        <strong>Side Swipe (Left or Right)</strong>
+        Swipe left or right to completely stop and exit autoscroll mode. Works from both SCROLLING and PAUSED states.
+      </div>
+
+      <h3>Tap Navigation</h3>
+      <p>When autoscroll is NOT active, you can use tap/click gestures for quick page navigation (works on both mobile and desktop):</p>
+      <ul>
+        <li><strong>Tap/Click Left Side:</strong> Page up (scroll up one viewport)</li>
+        <li><strong>Tap/Click Right Side:</strong> Page down (scroll down one viewport)</li>
+      </ul>
+      <p><em>Note: Tap navigation is disabled when autoscroll is active, and won't interfere with links or buttons.</em></p>
+
+      <h3>Managing the Whitelist</h3>
+      
+      <h4>Quick Method <span class="platform-badge">Mobile</span></h4>
+      <ol>
+        <li>Navigate to the site you want to add</li>
+        <li>Tap with 3 fingers anywhere on the page</li>
+        <li>A toast message confirms the site is now whitelisted</li>
+        <li>Tap with 3 fingers again to remove it from the whitelist</li>
+      </ol>
+
+      <h4>Settings Page Method</h4>
+      <ol>
+        <li>Open the Settings tab (this page)</li>
+        <li>Scroll to "Active Hosts (Whitelist)"</li>
+        <li>Type a domain name (e.g., <code>medium.com</code>) and click "Add Host"</li>
+        <li>Or click "Add current site to whitelist" if you're viewing a page</li>
+      </ol>
+
+      <h3>Troubleshooting</h3>
+      
+      <div class="troubleshooting-item">
+        <strong>Extension doesn't work on a page</strong>
+        Make sure you've added the site to your whitelist. Use the 3-finger tap gesture or add it manually in Settings.
+      </div>
+
+      <div class="troubleshooting-item">
+        <strong>Two-finger tap not working</strong>
+        Ensure both fingers touch the screen at the same time. The gesture should be quick (less than 200ms).
+      </div>
+
+      <div class="troubleshooting-item">
+        <strong>Page scrolls when adjusting speed</strong>
+        This has been fixed in the latest version. Make sure you're running the most recent version of the extension.
+      </div>
+
+      <div class="troubleshooting-item">
+        <strong>Speed adjustments not working</strong>
+        Make sure you're swiping far enough (at least 50 pixels). Swipe slowly and deliberately for better detection.
+      </div>
+
+      <div class="troubleshooting-item">
+        <strong>Tap navigation triggers on buttons/links</strong>
+        The extension should automatically detect interactive elements. If you experience issues, please report them.
+      </div>
+
+      <div class="troubleshooting-item">
+        <strong>Desktop scroll activation too sensitive</strong>
+        The extension activates on any downward scroll. If this is too sensitive for your use case, you can disable autoscroll in Settings and use the mobile gestures only.
+      </div>
+    </div>
+  </div>
+
+</div>
+
+  <div class="status-message" id="statusMessage"></div>
+
+  <script src="options.js"></script>
+</body>
+</html>
