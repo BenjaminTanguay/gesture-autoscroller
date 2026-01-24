@@ -4,13 +4,15 @@ A Firefox extension for Android that reduces hand strain during mobile reading b
 
 ## Why This Exists
 
-Reading long articles on mobile devices requires repetitive thumb movements to scroll, which can cause hand strain during extended reading sessions. This extension provides ergonomic alternatives:
+Reading long form texts like books, articles or light novels on mobile devices requires repetitive thumb movements to scroll, which can cause hand strain during extended reading sessions. This extension provides ergonomic alternatives:
 
 - **Hands-free reading** with automatic scrolling
 - **Simple tap navigation** to avoid dragging gestures
 - **Gesture-based speed control** for comfortable reading pace
 
 This is a personal weekend project built to solve my own reading fatigue. I'm sharing it in case others find it useful, but **I'm not interested in adding additional features**. The codebase is straightforward if you want to fork and customize it for your needs.
+
+Note: This was mostly LLM generated as a way to test AI with a useful project. I have no idea if the code generated is maintainable or not. I can only say that the features seem to work in my environment.
 
 ## Features
 
@@ -232,25 +234,11 @@ Checks:
 
 This project was inspired by and draws from:
 
+- MoonReader app on android for gesture based autoscrolling
 - [**firefox-simple_gesture**](https://github.com/utubo/firefox-simple_gesture) - Touch event handling and gesture detection patterns
 - [**AutoScrolling**](https://github.com/hisakaz0/AutoScrolling) - Core autoscrolling mechanism and speed control
 
 The `context/research/` directory contains detailed analysis of these projects and the code patterns adapted for this extension.
-
-## Technical Details
-
-- **Browser**: Firefox 109.0+ (Desktop and Android)
-- **Manifest**: Version 2 (required for Firefox Android)
-- **Permissions**: `storage` and `activeTab` (minimal and privacy-friendly)
-- **Platforms**: 
-  - Primary: Firefox for Android
-  - Also works: Firefox Desktop (for development and desktop use)
-
-## Known Limitations
-
-1. **Volume keys**: Cannot be captured by browser extensions due to Android security sandboxing (researched and confirmed not feasible)
-2. **Some websites**: Sites with custom scroll containers may require specific handling
-3. **Gesture conflicts**: Some sites with their own gesture handlers may interfere
 
 ## Contributing
 
