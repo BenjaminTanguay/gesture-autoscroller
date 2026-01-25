@@ -53,7 +53,6 @@ document.addEventListener('DOMContentLoaded', async () => {
         currentSettings = newSettings;
         // Update UI to reflect new settings
         updateUI();
-        console.log('Options UI updated from storage change:', newSettings);
       }
     }
   });
@@ -137,8 +136,6 @@ async function loadSettings() {
       // No settings found, use defaults
       currentSettings = { ...DEFAULT_SETTINGS };
     }
-    
-    console.log('Settings loaded:', currentSettings);
   } catch (error) {
     console.error('Failed to load settings:', error);
     showStatusMessage('Failed to load settings', 'error');
@@ -364,7 +361,6 @@ async function loadCurrentPageInfo() {
       updateCurrentPageStatus(host);
     }
   } catch (error) {
-    console.log('Could not load current page info:', error);
     // Hide current page section if there's an error
     elements.currentPageSection.style.display = 'none';
   }
@@ -480,7 +476,6 @@ async function autoSaveSettings() {
     // Update current settings
     currentSettings = settings;
     
-    console.log('Settings auto-saved:', settings);
     showStatusMessage('Saved', 'success');
     
     // Notify content scripts of settings change
@@ -512,7 +507,7 @@ async function notifyContentScripts() {
       }
     }
   } catch (error) {
-    console.log('Could not notify content scripts:', error);
+    // Could not notify content scripts
   }
 }
 

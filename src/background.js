@@ -14,8 +14,6 @@ const DEFAULT_SETTINGS = {
 
 // Initialize settings on extension install/update
 browser.runtime.onInstalled.addListener(async (details) => {
-  console.log('Gesture AutoScroller installed/updated:', details.reason);
-  
   try {
     const result = await browser.storage.local.get('gesture_autoscroller_settings');
     
@@ -24,7 +22,6 @@ browser.runtime.onInstalled.addListener(async (details) => {
       await browser.storage.local.set({
         gesture_autoscroller_settings: DEFAULT_SETTINGS
       });
-      console.log('Default settings initialized');
     } else {
       // Update - merge with defaults to add any new settings
       const currentSettings = result.gesture_autoscroller_settings;
@@ -36,7 +33,6 @@ browser.runtime.onInstalled.addListener(async (details) => {
       await browser.storage.local.set({
         gesture_autoscroller_settings: mergedSettings
       });
-      console.log('Settings updated with new defaults');
     }
   } catch (error) {
     console.error('Failed to initialize settings:', error);
@@ -45,8 +41,6 @@ browser.runtime.onInstalled.addListener(async (details) => {
 
 // Listen for messages from content scripts and options page
 browser.runtime.onMessage.addListener(async (message, sender) => {
-  console.log('Background received message:', message.action);
-  
   switch (message.action) {
     case 'getSettings':
       return await getSettings();
@@ -58,7 +52,6 @@ browser.runtime.onMessage.addListener(async (message, sender) => {
       return await isHostWhitelisted(message.host);
       
     default:
-      console.warn('Unknown message action:', message.action);
       return { error: 'Unknown action' };
   }
 });
@@ -81,7 +74,6 @@ async function saveSettings(settings) {
     await browser.storage.local.set({
       gesture_autoscroller_settings: settings
     });
-    console.log('Settings saved:', settings);
     return { success: true };
   } catch (error) {
     console.error('Failed to save settings:', error);
@@ -165,15 +157,12 @@ async function updateBrowserActionIcon(tab) {
     }
   } catch (error) {
     // Ignore errors for special tabs
-    console.log('Could not update browser action icon:', error.message);
   }
 }
 
 // Listen for storage changes and notify content scripts
 browser.storage.onChanged.addListener(async (changes, areaName) => {
   if (areaName === 'local' && changes.gesture_autoscroller_settings) {
-    console.log('Settings changed, notifying content scripts');
-    
     try {
       const tabs = await browser.tabs.query({});
       const newSettings = changes.gesture_autoscroller_settings.newValue;
@@ -189,9 +178,7 @@ browser.storage.onChanged.addListener(async (changes, areaName) => {
         }
       }
     } catch (error) {
-      console.log('Could not notify content scripts:', error);
+      // Could not notify content scripts
     }
   }
 });
-
-console.log('Gesture AutoScroller background script initialized');

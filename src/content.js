@@ -6,8 +6,6 @@
 (function() {
   'use strict';
   
-  console.log('🚀 Gesture AutoScroller: Extension loaded successfully.');
-  
   // ============================================================================
   // CONFIGURATION & STATE
   // ============================================================================
@@ -45,12 +43,15 @@
   // For tracking continuous gesture direction changes
   let lastCheckX = 0; // Last position where we checked direction
   let lastCheckY = 0; // Last position where we checked direction
+  let lastSpeedAdjustmentY = 0; // Last Y position where we adjusted speed
+  let accumulatedSpeedDistance = 0; // Accumulated distance for speed adjustment
   
   // Constants
   const TAP_MAX_DURATION = 200; // milliseconds (quick tap)
   const TAP_MAX_MOVEMENT = 10; // pixels
   const SWIPE_MIN_DISTANCE = 50; // pixels (minimum swipe distance)
   const GESTURE_SEQUENCE_TIMEOUT = 2000; // milliseconds (time window for gesture sequence)
+  const SPEED_ADJUSTMENT_DISTANCE = 30; // pixels traveled to trigger one speed adjustment
   
   // Toast state
   let toastElement = null;
@@ -82,8 +83,6 @@
   
   // Initialize extension
   async function init() {
-    console.log('Initializing Gesture AutoScroller...');
-    
     // Add countdown animation styles
     addCountdownStyles();
     
@@ -97,8 +96,6 @@
     // Check if extension should be active on this site
     if (await isHostWhitelisted()) {
       activateExtension();
-    } else {
-      console.log('Extension not active on this host (use 3-finger tap to enable)');
     }
   }
   
@@ -113,8 +110,6 @@
           ...result.gesture_autoscroller_settings
         };
       }
-      
-      console.log('Settings loaded:', settings);
     } catch (error) {
       console.error('Failed to load settings:', error);
     }
@@ -130,8 +125,6 @@
       await browser.storage.local.set({
         gesture_autoscroller_settings: settings
       });
-      
-      console.log('Speed saved to storage:', newSpeed);
     } catch (error) {
       console.error('Failed to save speed:', error);
     }
@@ -160,14 +153,10 @@
   
   // Activate extension features
   function activateExtension() {
-    console.log('Activating extension...');
     isExtensionActive = true;
     
     // Touch listeners are already set up in init() for three-finger tap
     // No need to set them up again here
-    
-    // Show activation toast
-    showToast('Gesture AutoScroller Active');
     
     // Start auto-start countdown if enabled
     if (settings.autoStartEnabled && settings.autoscrollEnabled) {
@@ -177,7 +166,6 @@
   
   // Deactivate extension features
   function deactivateExtension() {
-    console.log('Deactivating extension...');
     isExtensionActive = false;
     
     // Keep touch listeners active for three-finger tap functionality
@@ -208,7 +196,6 @@
       
       // Show confirmation
       showToast(`Disabled for ${currentHost}`, 2500);
-      console.log(`Removed ${currentHost} from whitelist`);
     } else {
       // Add to whitelist
       if (!settings.whitelistedHosts) {
@@ -226,7 +213,6 @@
       
       // Show confirmation
       showToast(`Enabled for ${currentHost}`, 2500);
-      console.log(`Added ${currentHost} to whitelist`);
     }
   }
   
@@ -244,7 +230,6 @@
     // Cancel any existing countdown
     cancelAutoStartCountdown();
     
-    console.log(`Starting auto-start countdown: ${settings.autoStartDelay} seconds`);
     autoStartRemainingSeconds = settings.autoStartDelay;
     
     // Show initial countdown notification
@@ -399,6 +384,8 @@
     gestureSequence = [];
     lastCheckX = touchStartX;
     lastCheckY = touchStartY;
+    lastSpeedAdjustmentY = touchStartY;
+    accumulatedSpeedDistance = 0;
     
     // Cancel auto-start countdown on any touch interaction
     if (autoStartCountdownInterval) {
@@ -421,13 +408,31 @@
     
     [touchEndX, touchEndY] = getXY(event);
     
+    // FIRST: Handle speed adjustment continuously (with low threshold)
+    // This runs on every touch move when autoscroll is active
+    if (autoscroller && autoscroller.isActive()) {
+      const deltaYFromStart = touchEndY - touchStartY;
+      const absYFromStart = Math.abs(deltaYFromStart);
+      
+      // Determine if this is primarily a vertical gesture
+      const deltaXFromStart = touchEndX - touchStartX;
+      const absXFromStart = Math.abs(deltaXFromStart);
+      
+      // If vertical movement dominates, handle speed adjustment
+      if (absYFromStart > absXFromStart && absYFromStart > 10) {
+        const direction = deltaYFromStart > 0 ? 'down' : 'up';
+        handleDistanceBasedSpeedAdjustment(direction);
+      }
+    }
+    
+    // SECOND: Handle gesture direction detection (for side swipes, etc.)
     // Calculate delta from last check position (for continuous direction changes)
     const deltaX = touchEndX - lastCheckX;
     const deltaY = touchEndY - lastCheckY;
     const absX = Math.abs(deltaX);
     const absY = Math.abs(deltaY);
     
-    // Only process if movement is significant since last check
+    // Only process gesture direction if movement is significant since last check
     if (absX < SWIPE_MIN_DISTANCE && absY < SWIPE_MIN_DISTANCE) {
       return;
     }
@@ -444,7 +449,6 @@
     if (currentDirection !== lastGestureDirection && lastGestureDirection !== null) {
       // Direction changed during continuous touch - add to gesture sequence
       gestureSequence.push(currentDirection);
-      console.log('Continuous gesture sequence:', gestureSequence);
       
       // Check for activation pattern (down -> left) or speed adjustment
       handleContinuousGesture(currentDirection);
@@ -465,12 +469,6 @@
     // Update last direction
     lastGestureDirection = currentDirection;
     isTrackingContinuousGesture = true;
-    
-    // If autoscroll is active, continuously update speed during movement
-    if (autoscroller && autoscroller.isActive() && 
-        (currentDirection === 'up' || currentDirection === 'down')) {
-      handleContinuousSpeedAdjustment(currentDirection);
-    }
   }
   
   // Touch end handler
@@ -526,8 +524,6 @@
   
   // Setup touch event listeners
   function setupTouchListeners() {
-    console.log('Setting up touch listeners...');
-    
     if ('ontouchstart' in window) {
       // Mobile touch events
       // Use passive:false for touchmove to allow preventDefault() when autoscroll is active
@@ -548,8 +544,6 @@
   
   // Cleanup function
   function removeTouchListeners() {
-    console.log('Removing touch listeners...');
-    
     if ('ontouchstart' in window) {
       window.removeEventListener('touchstart', onTouchStart);
       window.removeEventListener('touchmove', onTouchMove);
@@ -591,8 +585,6 @@
     
     // Check if user is scrolling down (positive deltaY)
     if (event.deltaY > 0) {
-      console.log('Scroll down detected, activating autoscroll');
-      
       // Prevent default scroll behavior
       event.preventDefault();
       
@@ -653,7 +645,6 @@
     
     // Check if tap target is an interactive element
     if (isInteractiveElement(touchStartTarget)) {
-      console.log('Tap on interactive element, skipping navigation');
       return;
     }
     
@@ -665,11 +656,9 @@
     if (isLeftSide) {
       // Left side tap = Page up
       pageUp();
-      showToast('Page Up');
     } else {
       // Right side tap = Page down
       pageDown();
-      showToast('Page Down');
     }
   }
   
@@ -757,25 +746,36 @@
   
   // Handle continuous speed adjustment during active touch
   // This allows speed to keep changing while user maintains swipe motion
-  let lastSpeedAdjustmentTime = 0;
-  const SPEED_ADJUSTMENT_THROTTLE = 150; // ms between speed updates
-  
-  function handleContinuousSpeedAdjustment(direction) {
-    const now = Date.now();
+  // Speed adjustment is based on distance traveled, not time
+  function handleDistanceBasedSpeedAdjustment(direction) {
+    // Calculate distance traveled since last speed adjustment
+    const distanceTraveled = Math.abs(touchEndY - lastSpeedAdjustmentY);
     
-    // Throttle speed adjustments to avoid too-rapid changes
-    if (now - lastSpeedAdjustmentTime < SPEED_ADJUSTMENT_THROTTLE) {
-      return;
-    }
+    // Add to accumulated distance
+    accumulatedSpeedDistance += distanceTraveled;
     
-    lastSpeedAdjustmentTime = now;
+    // Update last adjustment position
+    lastSpeedAdjustmentY = touchEndY;
     
-    if (direction === 'up') {
-      autoscroller.increaseSpeed();
-      showToast(`Speed: ${Math.round(autoscroller.getCurrentSpeed())} px/sec`);
-    } else if (direction === 'down') {
-      autoscroller.decreaseSpeed();
-      showToast(`Speed: ${Math.round(autoscroller.getCurrentSpeed())} px/sec`);
+    // Check if we've traveled enough distance to trigger adjustments
+    if (accumulatedSpeedDistance >= SPEED_ADJUSTMENT_DISTANCE) {
+      // Calculate how many adjustments to make based on distance
+      const numAdjustments = Math.floor(accumulatedSpeedDistance / SPEED_ADJUSTMENT_DISTANCE);
+      
+      // Reset accumulated distance (keep remainder)
+      accumulatedSpeedDistance = accumulatedSpeedDistance % SPEED_ADJUSTMENT_DISTANCE;
+      
+      // Apply multiple speed adjustments
+      for (let i = 0; i < numAdjustments; i++) {
+        if (direction === 'up') {
+          autoscroller.increaseSpeed();
+        } else if (direction === 'down') {
+          autoscroller.decreaseSpeed();
+        }
+      }
+      
+      // Show toast with current speed (only once per batch of adjustments)
+      showToast(`Speed: ${Math.round(autoscroller.getCurrentSpeed())} px/sec`, 600);
     }
   }
   
@@ -788,8 +788,6 @@
     } else {
       direction = deltaX > 0 ? 'right' : 'left';
     }
-    
-    console.log('Swipe ended:', direction);
     
     // If continuous gesture tracking was active, most logic already handled
     // Otherwise handle as discrete swipe (backward compatibility)
@@ -833,7 +831,6 @@
     autoscroller = new AutoScroller(settings);
     
     autoscroller.start();
-    showToast('Autoscroll activated');
   }
   
   // ============================================================================
@@ -1002,7 +999,6 @@
       }
       
       this.animationFrameId = requestAnimationFrame(this.scroll.bind(this));
-      console.log(`Started scrolling at ${this.currentSpeed} px/sec (smooth: ${this.usesSmoothScroll})`);
     }
     
     // Stop the scrolling animation loop
@@ -1076,7 +1072,12 @@
   
   // Show toast message
   function showToast(message, duration = 1500) {
-    // Remove existing toast
+    // Safety check: ensure document.body exists
+    if (!document.body) {
+      return;
+    }
+    
+    // Remove existing toast and clear any pending timeout
     hideToast();
     
     // Create toast element
@@ -1102,33 +1103,51 @@
       box-shadow: 0 4px 12px rgba(0,0,0,0.3);
     `;
     
-    document.body.appendChild(toastElement);
-    
-    // Fade in
-    requestAnimationFrame(() => {
-      toastElement.style.opacity = '1';
-    });
-    
-    // Auto-hide after duration
-    toastTimeout = setTimeout(() => {
-      hideToast();
-    }, duration);
+    try {
+      document.body.appendChild(toastElement);
+      
+      // Fade in
+      requestAnimationFrame(() => {
+        if (toastElement) {
+          toastElement.style.opacity = '1';
+        }
+      });
+      
+      // Auto-hide after duration
+      toastTimeout = setTimeout(() => {
+        hideToast();
+      }, duration);
+    } catch (error) {
+      console.error('Failed to show toast:', error);
+      toastElement = null;
+    }
   }
   
   // Hide toast
   function hideToast() {
-    if (toastElement) {
-      toastElement.style.opacity = '0';
-      setTimeout(() => {
-        if (toastElement && toastElement.parentNode) {
-          toastElement.parentNode.removeChild(toastElement);
-        }
-        toastElement = null;
-      }, 300);
-    }
+    // Clear any pending timeout first
     if (toastTimeout) {
       clearTimeout(toastTimeout);
       toastTimeout = null;
+    }
+    
+    // Then hide and remove the element
+    if (toastElement) {
+      try {
+        toastElement.style.opacity = '0';
+        
+        const elementToRemove = toastElement;
+        toastElement = null; // Clear reference immediately
+        
+        setTimeout(() => {
+          if (elementToRemove && elementToRemove.parentNode) {
+            elementToRemove.parentNode.removeChild(elementToRemove);
+          }
+        }, 300);
+      } catch (error) {
+        console.error('Failed to hide toast:', error);
+        toastElement = null;
+      }
     }
   }
   
@@ -1139,7 +1158,6 @@
   // Listen for messages from options page (settings updates)
   browser.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (message.action === 'settingsUpdated') {
-      console.log('Settings updated:', message.settings);
       settings = message.settings;
       
       // Re-check if extension should be active
