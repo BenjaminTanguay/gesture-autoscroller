@@ -1,8 +1,8 @@
 // Gesture AutoScroller - Options Page Script
-// Handles settings UI and storage with autosave
+// Handles per-domain settings UI and storage with autosave
 
-// Default settings structure
-const DEFAULT_SETTINGS = {
+// Default configuration structure (per-domain)
+const DEFAULT_CONFIG = {
   tapNavigationEnabled: true,
   autoscrollEnabled: true,
   autoStartEnabled: false,    // Auto-start scrolling on page load
@@ -14,23 +14,29 @@ const DEFAULT_SETTINGS = {
   tapScrollPercentage: 100,   // Percentage of viewport height to scroll (10-100%)
   tapZoneLayout: 'horizontal', // Options: 'horizontal', 'vertical'
   tapZoneUpPercentage: 50,    // Size of scroll-up zone (10-90%)
-  whitelistedHosts: [],
   
-  // Auto-navigate settings
-  autoNavigateEnabled: false,           // Global enable/disable
+  // Auto-navigate settings (per-domain)
+  autoNavigateEnabled: false,           // Enable/disable for this domain
   autoNavigateDelay: 3,                 // Seconds before clicking next (1-30)
   autoNavigateAutoStart: true,          // Auto-start scroll on new page
-  
-  // Per-site navigation selectors (hostname -> config)
-  navigationSelectors: {}
+  navigationSelector: null              // { selector, enabled, delay, autoStart, notes } or null
 };
 
-// Current settings in memory
-let currentSettings = { ...DEFAULT_SETTINGS };
+// Current data in memory
+let defaultConfig = { ...DEFAULT_CONFIG };
+let domainConfigs = {};  // hostname -> config
+let whitelist = [];      // array of whitelisted hostnames
+let currentDomain = '__default__';  // Currently selected domain (__default__ or hostname)
+let currentConfig = { ...DEFAULT_CONFIG };  // Config for currently selected domain
+let presets = {};        // name -> config (presets library)
 
 // Autosave debounce timer
 let autosaveTimer = null;
 const AUTOSAVE_DELAY = 500; // milliseconds
+
+// Track if we are currently saving to prevent storage listener from reloading
+let isSaving = false;
+let saveTimestamp = 0; // Timestamp of last save to ignore immediate storage changes
 
 // DOM elements
 let elements = {};
@@ -43,64 +49,54 @@ function toggleSection(sectionId) {
   }
 }
 
-// Make toggleSection available globally for onclick handlers
-window.toggleSection = toggleSection;
-
-// Setup collapsible section event listeners
+// Setup collapsible section event listeners (no longer needed with tabs)
 function setupCollapsibleSections() {
-  const sections = ['tapSection', 'autoscrollSection', 'whitelistSection', 'autoNavigateSection'];
-  
-  sections.forEach(sectionId => {
-    const section = document.getElementById(sectionId);
-    if (section) {
-      const header = section.querySelector('.collapsible-header');
-      if (header) {
-        header.addEventListener('click', (e) => {
-          e.preventDefault();
-          e.stopPropagation();
-          toggleSection(sectionId);
-        });
-      }
-    }
-  });
+  // No collapsible sections in the new tab-based design
 }
 
 // Check for picked element in storage
 async function checkForPickedElement() {
-  console.log('Checking for picked element in storage...');
   try {
+    console.log('Checking for picked element in storage...');
     const result = await browser.storage.local.get(['pickedElement', 'pickedElementTimestamp']);
     console.log('Storage result:', result);
     
     if (result.pickedElement && result.pickedElementTimestamp) {
       // Check if it's recent (within last 30 seconds)
       const age = Date.now() - result.pickedElementTimestamp;
-      console.log('Picked element age:', age, 'ms');
+      console.log('Picked element age (ms):', age);
       
       if (age < 30000) {
-        console.log('Found recent picked element, processing...');
+        console.log('Processing picked element:', result.pickedElement);
         // Process the picked element
-        handleElementPicked({
+        await handleElementPicked({
           action: 'elementPicked',
           elementInfo: result.pickedElement
         });
         
-        // Clear it from storage so we don't process it again
+        // Clear from storage
         await browser.storage.local.remove(['pickedElement', 'pickedElementTimestamp']);
         console.log('Cleared picked element from storage');
+        return true; // Found and processed a picked element
       } else {
         console.log('Picked element too old, ignoring');
+        // Clear old picked element
+        await browser.storage.local.remove(['pickedElement', 'pickedElementTimestamp']);
       }
     } else {
       console.log('No picked element in storage');
     }
+    return false; // No picked element found
   } catch (error) {
     console.error('Error checking for picked element:', error);
+    return false;
   }
 }
 
 // Initialize the options page
 document.addEventListener('DOMContentLoaded', async () => {
+  console.log('=== Options page DOMContentLoaded ===');
+  
   // Cache DOM elements
   cacheElements();
   
@@ -110,22 +106,26 @@ document.addEventListener('DOMContentLoaded', async () => {
   // Load settings from storage
   await loadSettings();
   
-  // Update UI with loaded settings
+  // Check for picked element BEFORE auto-selecting domain
+  // This ensures we switch to the correct domain if an element was picked
+  const hasPickedElement = await checkForPickedElement();
+  
+  // Auto-select current tab's domain if whitelisted (only if no picked element)
+  if (!hasPickedElement) {
+    await autoSelectCurrentTabDomain();
+  }
+  
+  // Update UI with loaded settings (may be updated again by handleElementPicked)
   updateUI();
   
   // Setup event listeners
   setupEventListeners();
   
-  // Initialize collapsible sections - start with sections collapsed
-  const autoscrollSection = document.getElementById('autoscrollSection');
-  const whitelistSection = document.getElementById('whitelistSection');
-  const autoNavigateSection = document.getElementById('autoNavigateSection');
-  if (autoscrollSection) autoscrollSection.classList.add('collapsed');
-  if (whitelistSection) whitelistSection.classList.add('collapsed');
-  if (autoNavigateSection) autoNavigateSection.classList.add('collapsed');
+  // Setup preset listeners
+  setupPresetListeners();
   
-  // Setup collapsible section click handlers
-  setupCollapsibleSections();
+  // Setup domain selector sync across all tabs
+  setupDomainSelectorSync();
   
   // Load current page info (if available)
   loadCurrentPageInfo();
@@ -133,20 +133,57 @@ document.addEventListener('DOMContentLoaded', async () => {
   // Initialize auto-navigate feature (after settings are loaded)
   initAutoNavigate();
   
-  // Check for picked element from storage (fallback method)
-  await checkForPickedElement();
-  
   // Listen for storage changes to update UI in real-time
-  browser.storage.onChanged.addListener((changes, areaName) => {
-    if (areaName === 'local' && changes.gesture_autoscroller_settings) {
-      const newSettings = changes.gesture_autoscroller_settings.newValue;
-      if (newSettings) {
-        // Update current settings
-        currentSettings = newSettings;
-        // Update UI to reflect new settings
-        updateUI();
+  browser.storage.onChanged.addListener(async (changes, areaName) => {
+    if (areaName === 'local') {
+      // Only reload if changes were made from another tab/window
+      // If we made the change ourselves, we've already updated the UI
+      const timeSinceLastSave = Date.now() - saveTimestamp;
+      if (isSaving || timeSinceLastSave < 500) {
+        return;
+      }
+      
+      // Reload configs if changed externally
+      if (changes.gesture_autoscroller_domain_configs || 
+          changes.gesture_autoscroller_default_config) {
+        // Reload all settings
+        await loadSettings();
+        // Re-select current domain to get latest config (skip saving since we're reloading)
+        if (currentDomain) {
+          await switchDomain(currentDomain, true);
+        }
+      }
+      
+      // Reload whitelist if changed externally
+      if (changes.gesture_autoscroller_whitelist) {
+        const newWhitelist = changes.gesture_autoscroller_whitelist.newValue;
+        if (newWhitelist) {
+          whitelist = newWhitelist;
+          updateDomainSelector();
+          renderWhitelist();
+          // Re-check domain selection when whitelist changes
+          await autoSelectCurrentTabDomain();
+          updateUI();
+        }
       }
     }
+  });
+  
+  // Listen for page visibility changes to update domain selection
+  // This handles when user switches back to the settings tab
+  document.addEventListener('visibilitychange', async () => {
+    if (!document.hidden) {
+      console.log('Settings page became visible, re-checking domain selection');
+      await autoSelectCurrentTabDomain();
+      updateUI();
+    }
+  });
+  
+  // Also listen for window focus events
+  window.addEventListener('focus', async () => {
+    console.log('Settings page gained focus, re-checking domain selection');
+    await autoSelectCurrentTabDomain();
+    updateUI();
   });
 });
 
@@ -176,10 +213,18 @@ function setupTabs() {
 // Cache all DOM elements
 function cacheElements() {
   elements = {
+    // Domain selectors (one per tab)
+    domainSelector: document.getElementById('domainSelector'),
+    domainSelector2: document.getElementById('domainSelector2'),
+    domainSelector3: document.getElementById('domainSelector3'),
+    domainSelector4: document.getElementById('domainSelector4'),
+    domainSelector5: document.getElementById('domainSelector5'),
+    
     // Feature toggles
     tapNavigationEnabled: document.getElementById('tapNavigationEnabled'),
     autoscrollEnabled: document.getElementById('autoscrollEnabled'),
     autoStartEnabled: document.getElementById('autoStartEnabled'),
+    autoNavigateEnabled: document.getElementById('autoNavigateEnabled'),
     
     // Tap zone layout
     tapZoneLayoutHorizontal: document.getElementById('tapZoneLayoutHorizontal'),
@@ -228,61 +273,298 @@ function cacheElements() {
   };
 }
 
-// Load settings from browser storage
+// Load all configurations from browser storage
 async function loadSettings() {
   try {
-    const result = await browser.storage.local.get('gesture_autoscroller_settings');
+    const response = await browser.runtime.sendMessage({
+      action: 'getSettings'  // Will call getAllConfigs() since no host is provided
+    });
     
-    if (result.gesture_autoscroller_settings) {
-      currentSettings = {
-        ...DEFAULT_SETTINGS,
-        ...result.gesture_autoscroller_settings
-      };
+    if (response && response.success) {
+      defaultConfig = response.defaultConfig || { ...DEFAULT_CONFIG };
+      domainConfigs = response.domainConfigs || {};
+      whitelist = response.whitelist || [];
+      
+      // Set current config to default initially
+      currentDomain = '__default__';
+      currentConfig = { ...defaultConfig };
+      
+      // Update domain selector dropdown
+      updateDomainSelector();
     } else {
-      // No settings found, use defaults
-      currentSettings = { ...DEFAULT_SETTINGS };
+      // No settings found or error, use defaults
+      defaultConfig = { ...DEFAULT_CONFIG };
+      domainConfigs = {};
+      whitelist = [];
+      currentConfig = { ...DEFAULT_CONFIG };
     }
+    
+    // Load presets
+    await loadPresets();
   } catch (error) {
     console.error('Failed to load settings:', error);
     showStatusMessage('Failed to load settings', 'error');
   }
 }
 
-// Update UI with current settings
+// Auto-select current tab's domain if it's whitelisted
+async function autoSelectCurrentTabDomain() {
+  try {
+    console.log('=== Auto-selecting current tab domain ===');
+    console.log('Current whitelist:', whitelist);
+    console.log('Timestamp:', new Date().toISOString());
+    
+    // Strategy 1: Ask background script for the last active tab (most reliable)
+    try {
+      const response = await browser.runtime.sendMessage({ action: 'getLastActiveTab' });
+      console.log('Last active tab from background:', response);
+      
+      if (response && response.success && response.tabInfo) {
+        const tabInfo = response.tabInfo;
+        const host = tabInfo.hostname;
+        const whitelistedHost = findWhitelistedHost(host);
+        
+        console.log('Found whitelisted host from background tracker:', whitelistedHost);
+        if (whitelistedHost) {
+          await switchToDomain(whitelistedHost);
+          console.log('Switched to domain:', whitelistedHost);
+          return;
+        } else {
+          // Host exists but not whitelisted - switch to default
+          console.log('Last active tab is not whitelisted, switching to default');
+          await switchToDomain('__default__');
+          return;
+        }
+      }
+    } catch (e) {
+      console.log('Could not get last active tab from background:', e);
+    }
+    
+    // Strategy 2: Try to get the opener tab (tab that opened this options page)
+    const currentTab = await browser.tabs.getCurrent();
+    console.log('Current tab:', currentTab);
+    
+    if (currentTab && currentTab.openerTabId) {
+      try {
+        const openerTab = await browser.tabs.get(currentTab.openerTabId);
+        console.log('Opener tab:', openerTab);
+        if (openerTab && openerTab.url) {
+          const url = new URL(openerTab.url);
+          console.log('Opener tab URL:', url.href, 'hostname:', url.hostname);
+          // Skip extension and special URLs
+          if (!url.protocol.startsWith('moz-extension') && 
+              !url.protocol.startsWith('about') &&
+              !url.protocol.startsWith('chrome')) {
+            const host = url.hostname;
+            const whitelistedHost = findWhitelistedHost(host);
+            console.log('Found whitelisted host from opener:', whitelistedHost);
+            if (whitelistedHost) {
+              await switchToDomain(whitelistedHost);
+              console.log('Switched to domain:', whitelistedHost);
+              return;
+            } else {
+              console.log('Opener tab is not whitelisted, switching to default');
+              await switchToDomain('__default__');
+              return;
+            }
+          }
+        }
+      } catch (e) {
+        console.log('Could not get opener tab:', e);
+      }
+    }
+    
+    // Strategy 3: Find the most recently accessed non-settings tab (fallback)
+    console.log('Trying strategy 3: finding most recent tab with lastAccessed');
+    const allTabs = await browser.tabs.query({});
+    console.log('All tabs count:', allTabs.length);
+    
+    // Get current tab ID to exclude it
+    const settingsTabId = currentTab ? currentTab.id : null;
+    
+    // Filter and sort tabs by lastAccessed
+    const candidateTabs = allTabs
+      .filter(tab => {
+        try {
+          // Skip the settings tab itself
+          if (settingsTabId && tab.id === settingsTabId) return false;
+          
+          if (!tab.url) return false;
+          const url = new URL(tab.url);
+          
+          // Only include http/https tabs
+          return url.protocol === 'http:' || url.protocol === 'https:';
+        } catch (e) {
+          return false;
+        }
+      })
+      .sort((a, b) => (b.lastAccessed || 0) - (a.lastAccessed || 0));
+    
+    console.log('Candidate tabs (sorted by lastAccessed):', candidateTabs.map(t => ({
+      url: t.url,
+      lastAccessed: t.lastAccessed,
+      id: t.id
+    })));
+    
+    // Try to find a whitelisted tab, checking in order of most recently accessed
+    for (const tab of candidateTabs) {
+      const url = new URL(tab.url);
+      const host = url.hostname;
+      const whitelistedHost = findWhitelistedHost(host);
+      
+      if (whitelistedHost) {
+        console.log('Found whitelisted host:', whitelistedHost, 'from tab:', tab.url);
+        await switchToDomain(whitelistedHost);
+        return;
+      }
+    }
+    
+    // If we found tabs but none were whitelisted
+    if (candidateTabs.length > 0) {
+      console.log('Found tabs but none are whitelisted, switching to default');
+    }
+    
+    console.log('No whitelisted domain found, switching to default');
+    // Switch to default if no whitelisted domain was found
+    await switchToDomain('__default__');
+    
+  } catch (error) {
+    // If there's an error, just stay with default selection
+    console.log('Could not auto-select domain:', error);
+    await switchToDomain('__default__');
+  }
+}
+
+// Helper: Find the whitelisted hostname for a given host
+function findWhitelistedHost(host) {
+  if (!host) return null;
+  
+  // Check if this host is whitelisted
+  if (!isHostWhitelisted(host)) return null;
+  
+  // Find the exact whitelisted hostname (could be parent domain)
+  return whitelist.find(whitelistedHost => {
+    // Exact match
+    if (host === whitelistedHost) return true;
+    // Subdomain match
+    if (host.endsWith('.' + whitelistedHost)) return true;
+    return false;
+  });
+}
+
+// Helper: Switch to a domain's configuration
+async function switchToDomain(hostname) {
+  console.log('Switching to domain:', hostname);
+  currentDomain = hostname;
+  
+  // Get the appropriate config
+  if (hostname === '__default__') {
+    currentConfig = { ...defaultConfig };
+  } else {
+    currentConfig = domainConfigs[hostname] || { ...defaultConfig };
+  }
+  
+  // Update all dropdowns to reflect the selection
+  const selectors = [
+    elements.domainSelector,
+    elements.domainSelector2,
+    elements.domainSelector3,
+    elements.domainSelector4,
+    elements.domainSelector5
+  ].filter(s => s);
+  
+  selectors.forEach(selector => {
+    selector.value = hostname;
+  });
+  
+  console.log('Current domain is now:', currentDomain);
+}
+
+// Setup domain selector synchronization across all tabs
+function setupDomainSelectorSync() {
+  const selectors = [
+    elements.domainSelector,
+    elements.domainSelector2,
+    elements.domainSelector3,
+    elements.domainSelector4,
+    elements.domainSelector5
+  ].filter(s => s);  // Filter out null/undefined
+  
+  selectors.forEach(selector => {
+    selector.addEventListener('change', async (e) => {
+      const newDomain = e.target.value;
+      await switchDomain(newDomain);
+      updateUI();
+      // Sync all other selectors
+      selectors.forEach(s => {
+        if (s !== selector) s.value = newDomain;
+      });
+    });
+  });
+}
+
+// Update domain selector dropdown with available domains
+function updateDomainSelector() {
+  const selectors = [
+    elements.domainSelector,
+    elements.domainSelector2,
+    elements.domainSelector3,
+    elements.domainSelector4,
+    elements.domainSelector5
+  ].filter(s => s);  // Filter out null/undefined
+  
+  selectors.forEach(selector => {
+    // Clear existing options except default
+    selector.innerHTML = '<option value="__default__">Default</option>';
+    
+    // Add whitelisted domains
+    whitelist.forEach(hostname => {
+      const option = document.createElement('option');
+      option.value = hostname;
+      option.textContent = hostname;
+      selector.appendChild(option);
+    });
+    
+    // Set selected value
+    selector.value = currentDomain;
+  });
+}
+
+// Update UI with current configuration
 function updateUI() {
   // Feature toggles
-  elements.tapNavigationEnabled.checked = currentSettings.tapNavigationEnabled;
-  elements.autoscrollEnabled.checked = currentSettings.autoscrollEnabled;
-  elements.autoStartEnabled.checked = currentSettings.autoStartEnabled;
+  elements.tapNavigationEnabled.checked = currentConfig.tapNavigationEnabled;
+  elements.autoscrollEnabled.checked = currentConfig.autoscrollEnabled;
+  elements.autoStartEnabled.checked = currentConfig.autoStartEnabled;
   
   // Tap zone layout
-  if (currentSettings.tapZoneLayout === 'horizontal') {
+  if (currentConfig.tapZoneLayout === 'horizontal') {
     elements.tapZoneLayoutHorizontal.checked = true;
   } else {
     elements.tapZoneLayoutVertical.checked = true;
   }
   
   // Speed settings - update both sliders and inputs
-  elements.defaultSpeed.value = currentSettings.defaultSpeed;
-  if (elements.defaultSpeedInput) elements.defaultSpeedInput.value = currentSettings.defaultSpeed;
+  elements.defaultSpeed.value = currentConfig.defaultSpeed;
+  if (elements.defaultSpeedInput) elements.defaultSpeedInput.value = currentConfig.defaultSpeed;
   
-  elements.minSpeed.value = currentSettings.minSpeed;
-  if (elements.minSpeedInput) elements.minSpeedInput.value = currentSettings.minSpeed;
+  elements.minSpeed.value = currentConfig.minSpeed;
+  if (elements.minSpeedInput) elements.minSpeedInput.value = currentConfig.minSpeed;
   
-  elements.maxSpeed.value = currentSettings.maxSpeed;
-  if (elements.maxSpeedInput) elements.maxSpeedInput.value = currentSettings.maxSpeed;
+  elements.maxSpeed.value = currentConfig.maxSpeed;
+  if (elements.maxSpeedInput) elements.maxSpeedInput.value = currentConfig.maxSpeed;
   
-  elements.granularity.value = currentSettings.granularity;
-  if (elements.granularityInput) elements.granularityInput.value = currentSettings.granularity;
+  elements.granularity.value = currentConfig.granularity;
+  if (elements.granularityInput) elements.granularityInput.value = currentConfig.granularity;
   
-  elements.autoStartDelay.value = currentSettings.autoStartDelay;
-  if (elements.autoStartDelayInput) elements.autoStartDelayInput.value = currentSettings.autoStartDelay;
+  elements.autoStartDelay.value = currentConfig.autoStartDelay;
+  if (elements.autoStartDelayInput) elements.autoStartDelayInput.value = currentConfig.autoStartDelay;
   
-  elements.tapScrollPercentage.value = currentSettings.tapScrollPercentage;
-  if (elements.tapScrollPercentageInput) elements.tapScrollPercentageInput.value = currentSettings.tapScrollPercentage;
+  elements.tapScrollPercentage.value = currentConfig.tapScrollPercentage;
+  if (elements.tapScrollPercentageInput) elements.tapScrollPercentageInput.value = currentConfig.tapScrollPercentage;
   
-  elements.tapZoneUpPercentage.value = currentSettings.tapZoneUpPercentage;
-  if (elements.tapZoneUpPercentageInput) elements.tapZoneUpPercentageInput.value = currentSettings.tapZoneUpPercentage;
+  elements.tapZoneUpPercentage.value = currentConfig.tapZoneUpPercentage;
+  if (elements.tapZoneUpPercentageInput) elements.tapZoneUpPercentageInput.value = currentConfig.tapZoneUpPercentage;
   
   // Update zone split preview
   updateZoneSplitPreview();
@@ -296,13 +578,13 @@ function updateUI() {
   const autoNavigateDelayValue = document.getElementById('autoNavigateDelayValue');
   const autoNavigateAutoStart = document.getElementById('autoNavigateAutoStart');
   
-  if (autoNavigateEnabled) autoNavigateEnabled.checked = currentSettings.autoNavigateEnabled;
-  if (autoNavigateDelay) autoNavigateDelay.value = currentSettings.autoNavigateDelay;
-  if (autoNavigateDelayValue) autoNavigateDelayValue.value = currentSettings.autoNavigateDelay;
-  if (autoNavigateAutoStart) autoNavigateAutoStart.checked = currentSettings.autoNavigateAutoStart;
+  if (autoNavigateEnabled) autoNavigateEnabled.checked = currentConfig.autoNavigateEnabled;
+  if (autoNavigateDelay) autoNavigateDelay.value = currentConfig.autoNavigateDelay;
+  if (autoNavigateDelayValue) autoNavigateDelayValue.value = currentConfig.autoNavigateDelay;
+  if (autoNavigateAutoStart) autoNavigateAutoStart.checked = currentConfig.autoNavigateAutoStart;
   
-  // Render navigation configs
-  renderNavigationConfigs();
+  // Render navigation selector (per-domain)
+  renderNavigationSelector();
   
   // Whitelist
   renderWhitelist();
@@ -354,18 +636,39 @@ function updateAutoStartSectionVisibility() {
   }
 }
 
+// Switch to a different domain's configuration
+async function switchDomain(hostname, skipSave = false) {
+  // Save current config before switching (unless explicitly skipped)
+  if (!skipSave && currentDomain) {
+    await saveCurrentConfig();
+  }
+  
+  // Update current domain
+  currentDomain = hostname;
+  
+  // Load config for new domain
+  if (hostname === '__default__') {
+    currentConfig = { ...defaultConfig };
+  } else {
+    currentConfig = domainConfigs[hostname] || { ...defaultConfig };
+  }
+  
+  // Update UI
+  updateUI();
+}
+
 // Render whitelist
 function renderWhitelist() {
   const list = elements.whitelistList;
   
-  if (!currentSettings.whitelistedHosts || currentSettings.whitelistedHosts.length === 0) {
+  if (!whitelist || whitelist.length === 0) {
     list.innerHTML = '<div class="whitelist-empty">No sites added yet. Add your favorite reading sites below.</div>';
     return;
   }
   
   list.innerHTML = '';
   
-  currentSettings.whitelistedHosts.forEach((host, index) => {
+  whitelist.forEach((host, index) => {
     const item = document.createElement('div');
     item.className = 'whitelist-item';
     
@@ -376,7 +679,7 @@ function renderWhitelist() {
     const removeBtn = document.createElement('button');
     removeBtn.className = 'whitelist-item-remove';
     removeBtn.textContent = 'Remove';
-    removeBtn.onclick = () => removeHost(index);
+    removeBtn.onclick = () => removeHost(host);
     
     item.appendChild(hostSpan);
     item.appendChild(removeBtn);
@@ -386,6 +689,8 @@ function renderWhitelist() {
 
 // Setup event listeners
 function setupEventListeners() {
+  // Domain selectors are set up in setupDomainSelectorSync()
+  
   // Setup slider-input synchronization (pass element keys from elements object)
   setupSliderSync('defaultSpeed', 'defaultSpeedInput');
   setupSliderSync('minSpeed', 'minSpeedInput');
@@ -408,6 +713,12 @@ function setupEventListeners() {
     updateAutoStartSectionVisibility();
     autoSaveSettings();
   });
+  
+  if (elements.autoNavigateEnabled) {
+    elements.autoNavigateEnabled.addEventListener('change', () => {
+      autoSaveSettings();
+    });
+  }
   
   // Tap zone layout - autosave on change and update preview
   elements.tapZoneLayoutHorizontal.addEventListener('change', () => {
@@ -510,7 +821,7 @@ function setupEventListeners() {
 }
 
 // Add host to whitelist
-function addHost() {
+async function addHost() {
   const input = elements.hostInput;
   const host = input.value.trim().toLowerCase();
   
@@ -526,41 +837,103 @@ function addHost() {
   }
   
   // Check for duplicates
-  if (currentSettings.whitelistedHosts.includes(host)) {
+  if (whitelist.includes(host)) {
     showStatusMessage('Host already in whitelist', 'error');
     return;
   }
   
-  // Add to whitelist
-  currentSettings.whitelistedHosts.push(host);
-  currentSettings.whitelistedHosts.sort();
-  
-  // Update UI
-  renderWhitelist();
-  input.value = '';
-  
-  // Update current page status if it matches
-  updateCurrentPageStatus();
-  
-  // Autosave after adding host
-  autoSaveSettings();
-  
-  showStatusMessage(`Added ${host}`, 'success');
+  try {
+    // Set flag to prevent storage listener from reloading
+    isSaving = true;
+    saveTimestamp = Date.now();
+    
+    try {
+      // Add to whitelist via background script
+      const response = await browser.runtime.sendMessage({
+        action: 'addToWhitelist',
+        hostname: host
+      });
+      
+      if (response && response.success) {
+        // Update local state
+        whitelist.push(host);
+        whitelist.sort();
+        
+        // Add domain config for new host (copy from default)
+        if (!domainConfigs[host]) {
+          domainConfigs[host] = { ...defaultConfig };
+        }
+        
+        // Update UI
+        updateDomainSelector();
+        renderWhitelist();
+        input.value = '';
+        
+        // Update current page status if it matches
+        updateCurrentPageStatus();
+        
+        showStatusMessage(`Added ${host}`, 'success');
+      } else {
+        showStatusMessage('Failed to add host', 'error');
+      }
+    } finally {
+      // Clear flag after storage operations complete
+      setTimeout(() => {
+        isSaving = false;
+      }, 100);
+    }
+  } catch (error) {
+    console.error('Failed to add host:', error);
+    showStatusMessage('Failed to add host', 'error');
+    isSaving = false;
+  }
 }
 
 // Remove host from whitelist
-function removeHost(index) {
-  const host = currentSettings.whitelistedHosts[index];
-  currentSettings.whitelistedHosts.splice(index, 1);
-  renderWhitelist();
-  
-  // Update current page status
-  updateCurrentPageStatus();
-  
-  // Autosave after removing host
-  autoSaveSettings();
-  
-  showStatusMessage(`Removed ${host}`, 'success');
+async function removeHost(host) {
+  try {
+    // Set flag to prevent storage listener from reloading
+    isSaving = true;
+    saveTimestamp = Date.now();
+    
+    try {
+      const response = await browser.runtime.sendMessage({
+        action: 'removeFromWhitelist',
+        hostname: host
+      });
+      
+      if (response && response.success) {
+        // Update local state
+        whitelist = whitelist.filter(h => h !== host);
+        
+        // Update UI
+        updateDomainSelector();
+        renderWhitelist();
+        
+        // Update current page status
+        updateCurrentPageStatus();
+        
+        // If we're currently viewing this domain's config, switch to default
+        if (currentDomain === host) {
+          elements.domainSelector.value = '__default__';
+          await switchDomain('__default__');
+        }
+        
+        showStatusMessage(`Removed ${host}`, 'success');
+      } else {
+        showStatusMessage('Failed to remove host', 'error');
+      }
+    } finally {
+      // Clear flag after storage operations complete
+      setTimeout(() => {
+        isSaving = false;
+      }, 100);
+    }
+  } catch (error) {
+    console.error('Failed to remove host:', error);
+    showStatusMessage('Failed to remove host', 'error');
+    isSaving = false;
+  }
 }
 
 // Validate host format
@@ -617,7 +990,7 @@ function updateCurrentPageStatus(host = null) {
 
 // Check if host is whitelisted
 function isHostWhitelisted(host) {
-  return currentSettings.whitelistedHosts.some(whitelistedHost => {
+  return whitelist.some(whitelistedHost => {
     // Exact match
     if (host === whitelistedHost) return true;
     
@@ -628,8 +1001,38 @@ function isHostWhitelisted(host) {
   });
 }
 
+// Render navigation selector for current domain
+function renderNavigationSelector() {
+  const navSiteSelector = document.getElementById('navSiteSelector');
+  const navSiteNotes = document.getElementById('navSiteNotes');
+  
+  console.log('renderNavigationSelector called');
+  console.log('  navSiteSelector element:', !!navSiteSelector);
+  console.log('  navSiteNotes element:', !!navSiteNotes);
+  console.log('  currentConfig.navigationSelector:', currentConfig.navigationSelector);
+  
+  if (!navSiteSelector || !navSiteNotes) {
+    console.log('  Skipping - elements not found');
+    return;
+  }
+  
+  // Get navigation selector for current config
+  const selector = currentConfig.navigationSelector;
+  
+  if (selector) {
+    navSiteSelector.value = selector.selector || '';
+    navSiteNotes.value = selector.notes || '';
+    console.log('  Set selector to:', navSiteSelector.value);
+    console.log('  Set notes to:', navSiteNotes.value);
+  } else {
+    navSiteSelector.value = '';
+    navSiteNotes.value = '';
+    console.log('  No selector in config, cleared fields');
+  }
+}
+
 // Add current site to whitelist
-function addCurrentSite() {
+async function addCurrentSite() {
   const host = elements.currentPageHost.textContent;
   
   if (isHostWhitelisted(host)) {
@@ -637,18 +1040,48 @@ function addCurrentSite() {
     return;
   }
   
-  // Add to whitelist
-  currentSettings.whitelistedHosts.push(host);
-  currentSettings.whitelistedHosts.sort();
-  
-  // Update UI
-  renderWhitelist();
-  updateCurrentPageStatus(host);
-  
-  // Autosave after adding host
-  autoSaveSettings();
-  
-  showStatusMessage(`Added ${host}`, 'success');
+  try {
+    // Set flag to prevent storage listener from reloading
+    isSaving = true;
+    saveTimestamp = Date.now();
+    
+    try {
+      // Add to whitelist via background script
+      const response = await browser.runtime.sendMessage({
+        action: 'addToWhitelist',
+        hostname: host
+      });
+      
+      if (response && response.success) {
+        // Update local state
+        whitelist.push(host);
+        whitelist.sort();
+        
+        // Add domain config for new host (copy from default)
+        if (!domainConfigs[host]) {
+          domainConfigs[host] = { ...defaultConfig };
+        }
+        
+        // Update UI
+        updateDomainSelector();
+        renderWhitelist();
+        updateCurrentPageStatus(host);
+        
+        showStatusMessage(`Added ${host}`, 'success');
+      } else {
+        showStatusMessage('Failed to add site', 'error');
+      }
+    } finally {
+      // Clear flag after storage operations complete
+      setTimeout(() => {
+        isSaving = false;
+      }, 100);
+    }
+  } catch (error) {
+    console.error('Failed to add site:', error);
+    showStatusMessage('Failed to add site', 'error');
+    isSaving = false;
+  }
 }
 
 // Update zone split preview
@@ -689,100 +1122,149 @@ function debouncedAutoSave() {
   }, AUTOSAVE_DELAY);
 }
 
-// Auto-save settings
-async function autoSaveSettings() {
+// Save current configuration
+async function saveCurrentConfig() {
   try {
-    // Check if input elements exist, otherwise fall back to sliders
-    const autoStartDelay = elements.autoStartDelayInput ? 
-      parseFloat(elements.autoStartDelayInput.value) : 
-      parseFloat(elements.autoStartDelay.value);
-    
-    const defaultSpeed = elements.defaultSpeedInput ? 
-      parseFloat(elements.defaultSpeedInput.value) : 
-      parseFloat(elements.defaultSpeed.value);
-    
-    const minSpeed = elements.minSpeedInput ? 
-      parseFloat(elements.minSpeedInput.value) : 
-      parseFloat(elements.minSpeed.value);
-    
-    const maxSpeed = elements.maxSpeedInput ? 
-      parseFloat(elements.maxSpeedInput.value) : 
-      parseFloat(elements.maxSpeed.value);
-    
-    const granularity = elements.granularityInput ? 
-      parseFloat(elements.granularityInput.value) : 
-      parseFloat(elements.granularity.value);
-    
-    const tapScrollPercentage = elements.tapScrollPercentageInput ? 
-      parseFloat(elements.tapScrollPercentageInput.value) : 
-      parseFloat(elements.tapScrollPercentage.value);
-    
-    const tapZoneUpPercentage = elements.tapZoneUpPercentageInput ? 
-      parseFloat(elements.tapZoneUpPercentageInput.value) : 
-      parseFloat(elements.tapZoneUpPercentage.value);
-    
-    // Get tap zone layout
-    const tapZoneLayout = elements.tapZoneLayoutHorizontal.checked ? 'horizontal' : 'vertical';
-    
-    // Get auto-navigate settings
-    const autoNavigateEnabled = document.getElementById('autoNavigateEnabled');
-    const autoNavigateDelay = document.getElementById('autoNavigateDelayValue') || document.getElementById('autoNavigateDelay');
-    const autoNavigateAutoStart = document.getElementById('autoNavigateAutoStart');
-    
     // Read current values from UI
-    const settings = {
-      tapNavigationEnabled: elements.tapNavigationEnabled.checked,
-      autoscrollEnabled: elements.autoscrollEnabled.checked,
-      autoStartEnabled: elements.autoStartEnabled.checked,
-      autoStartDelay: autoStartDelay,
-      defaultSpeed: defaultSpeed,
-      minSpeed: minSpeed,
-      maxSpeed: maxSpeed,
-      granularity: granularity,
-      tapScrollPercentage: tapScrollPercentage,
-      tapZoneLayout: tapZoneLayout,
-      tapZoneUpPercentage: tapZoneUpPercentage,
-      whitelistedHosts: currentSettings.whitelistedHosts,
-      
-      // Auto-navigate settings
-      autoNavigateEnabled: autoNavigateEnabled ? autoNavigateEnabled.checked : currentSettings.autoNavigateEnabled,
-      autoNavigateDelay: autoNavigateDelay ? parseFloat(autoNavigateDelay.value) : currentSettings.autoNavigateDelay,
-      autoNavigateAutoStart: autoNavigateAutoStart ? autoNavigateAutoStart.checked : currentSettings.autoNavigateAutoStart,
-      navigationSelectors: currentSettings.navigationSelectors || {}
-    };
+    const config = readConfigFromUI();
     
     // Validate speed settings silently
-    if (settings.minSpeed > settings.defaultSpeed) {
-      // Don't save, speeds are invalid
-      return;
+    if (config.minSpeed > config.defaultSpeed) {
+      return; // Don't save, speeds are invalid
     }
     
-    if (settings.defaultSpeed > settings.maxSpeed) {
-      // Don't save, speeds are invalid
-      return;
+    if (config.defaultSpeed > config.maxSpeed) {
+      return; // Don't save, speeds are invalid
     }
     
-    if (settings.minSpeed >= settings.maxSpeed) {
-      // Don't save, speeds are invalid
-      return;
+    if (config.minSpeed >= config.maxSpeed) {
+      return; // Don't save, speeds are invalid
     }
     
-    // Save to storage
-    await browser.storage.local.set({
-      gesture_autoscroller_settings: settings
-    });
+    // Update current config in memory
+    currentConfig = config;
     
-    // Update current settings
-    currentSettings = settings;
+    // Set flag to prevent storage listener from reloading
+    isSaving = true;
+    saveTimestamp = Date.now();
     
-    showStatusMessage('Saved', 'success');
-    
-    // Notify content scripts of settings change
-    notifyContentScripts();
+    try {
+      // Save to appropriate location
+      if (currentDomain === '__default__') {
+        // Save as default config
+        const response = await browser.runtime.sendMessage({
+          action: 'saveDefaultConfig',
+          config: config
+        });
+        
+        if (response && response.success) {
+          defaultConfig = { ...config };
+          showStatusMessage('Saved', 'success');
+        }
+      } else {
+        // Save as domain-specific config
+        const response = await browser.runtime.sendMessage({
+          action: 'saveDomainConfig',
+          hostname: currentDomain,
+          config: config
+        });
+        
+        if (response && response.success) {
+          domainConfigs[currentDomain] = { ...config };
+          showStatusMessage('Saved', 'success');
+        }
+      }
+    } finally {
+      // Always clear the flag after save completes
+      setTimeout(() => {
+        isSaving = false;
+      }, 100);
+    }
     
   } catch (error) {
-    console.error('Failed to auto-save settings:', error);
+    console.error('Failed to save config:', error);
+    isSaving = false;
   }
+}
+
+// Read configuration from UI elements
+function readConfigFromUI() {
+  // Check if input elements exist, otherwise fall back to sliders
+  const autoStartDelay = elements.autoStartDelayInput ? 
+    parseFloat(elements.autoStartDelayInput.value) : 
+    parseFloat(elements.autoStartDelay.value);
+  
+  const defaultSpeed = elements.defaultSpeedInput ? 
+    parseFloat(elements.defaultSpeedInput.value) : 
+    parseFloat(elements.defaultSpeed.value);
+  
+  const minSpeed = elements.minSpeedInput ? 
+    parseFloat(elements.minSpeedInput.value) : 
+    parseFloat(elements.minSpeed.value);
+  
+  const maxSpeed = elements.maxSpeedInput ? 
+    parseFloat(elements.maxSpeedInput.value) : 
+    parseFloat(elements.maxSpeed.value);
+  
+  const granularity = elements.granularityInput ? 
+    parseFloat(elements.granularityInput.value) : 
+    parseFloat(elements.granularity.value);
+  
+  const tapScrollPercentage = elements.tapScrollPercentageInput ? 
+    parseFloat(elements.tapScrollPercentageInput.value) : 
+    parseFloat(elements.tapScrollPercentage.value);
+  
+  const tapZoneUpPercentage = elements.tapZoneUpPercentageInput ? 
+    parseFloat(elements.tapZoneUpPercentageInput.value) : 
+    parseFloat(elements.tapZoneUpPercentage.value);
+  
+  // Get tap zone layout
+  const tapZoneLayout = elements.tapZoneLayoutHorizontal.checked ? 'horizontal' : 'vertical';
+  
+  // Get auto-navigate settings
+  const autoNavigateEnabled = document.getElementById('autoNavigateEnabled');
+  const autoNavigateDelay = document.getElementById('autoNavigateDelayValue') || document.getElementById('autoNavigateDelay');
+  const autoNavigateAutoStart = document.getElementById('autoNavigateAutoStart');
+  
+  // Get navigation selector
+  const navSiteSelector = document.getElementById('navSiteSelector');
+  const navSiteNotes = document.getElementById('navSiteNotes');
+  
+  let navigationSelector = null;
+  
+  // Update navigation selector if fields have values
+  if (navSiteSelector && navSiteSelector.value.trim()) {
+    navigationSelector = {
+      selector: navSiteSelector.value.trim(),
+      enabled: true,
+      delay: autoNavigateDelay ? parseFloat(autoNavigateDelay.value) : 3,
+      autoStart: autoNavigateAutoStart ? autoNavigateAutoStart.checked : true,
+      notes: navSiteNotes ? navSiteNotes.value.trim() : ''
+    };
+  }
+  
+  return {
+    tapNavigationEnabled: elements.tapNavigationEnabled.checked,
+    autoscrollEnabled: elements.autoscrollEnabled.checked,
+    autoStartEnabled: elements.autoStartEnabled.checked,
+    autoStartDelay: autoStartDelay,
+    defaultSpeed: defaultSpeed,
+    minSpeed: minSpeed,
+    maxSpeed: maxSpeed,
+    granularity: granularity,
+    tapScrollPercentage: tapScrollPercentage,
+    tapZoneLayout: tapZoneLayout,
+    tapZoneUpPercentage: tapZoneUpPercentage,
+    autoNavigateEnabled: autoNavigateEnabled ? autoNavigateEnabled.checked : currentConfig.autoNavigateEnabled,
+    autoNavigateDelay: autoNavigateDelay ? parseFloat(autoNavigateDelay.value) : currentConfig.autoNavigateDelay,
+    autoNavigateAutoStart: autoNavigateAutoStart ? autoNavigateAutoStart.checked : currentConfig.autoNavigateAutoStart,
+    navigationSelector: navigationSelector
+  };
+}
+
+// Auto-save settings (debounced wrapper for saveCurrentConfig)
+async function autoSaveSettings() {
+  await saveCurrentConfig();
 }
 
 // Save settings (kept for compatibility, but now just calls autoSave)
@@ -828,33 +1310,32 @@ function showStatusMessage(message, type = 'success', duration = 2000) {
 
 // Initialize auto-navigate feature
 function initAutoNavigate() {
-  // Check URL parameters for pre-filled selector info
+  // Check URL parameters for pre-filled selector info (from right-click context menu)
   const urlParams = new URLSearchParams(window.location.search);
   const selector = urlParams.get('selector');
   const hostname = urlParams.get('hostname');
   
   if (selector && hostname) {
-    // Pre-fill the form with captured selector
-    const navSiteHost = document.getElementById('navSiteHost');
-    const navSiteSelector = document.getElementById('navSiteSelector');
+    console.log('=== URL parameters detected (right-click method) ===');
+    console.log('Selector:', selector);
+    console.log('Hostname:', hostname);
     
-    if (navSiteHost && navSiteSelector) {
-      navSiteHost.value = hostname;
-      navSiteSelector.value = selector;
-      
-      // Scroll to the auto-navigate section
-      const autoNavigateSection = document.getElementById('autoNavigateSection');
-      if (autoNavigateSection) {
-        // Expand the section if collapsed
-        autoNavigateSection.classList.remove('collapsed');
-        // Scroll into view
-        setTimeout(() => {
-          autoNavigateSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
-        }, 100);
+    // Use the same handleElementPicked flow for consistency
+    handleElementPicked({
+      action: 'elementPicked',
+      elementInfo: {
+        selector: selector,
+        hostname: hostname
       }
-      
-      showStatusMessage('Element selector captured! Review and click "Add Configuration" to save.', 'success');
-    }
+    }).then(() => {
+      console.log('URL parameters processed successfully');
+      // Clear the URL parameters
+      const newUrl = window.location.pathname;
+      window.history.replaceState({}, document.title, newUrl);
+    }).catch(error => {
+      console.error('Failed to process URL parameters:', error);
+      showStatusMessage('Error processing selector from right-click', 'error');
+    });
   }
   
   // Cache auto-navigate elements
@@ -863,15 +1344,10 @@ function initAutoNavigate() {
     delay: document.getElementById('autoNavigateDelay'),
     delayValue: document.getElementById('autoNavigateDelayValue'),
     autoStart: document.getElementById('autoNavigateAutoStart'),
-    navSiteHost: document.getElementById('navSiteHost'),
     navSiteSelector: document.getElementById('navSiteSelector'),
-    navSiteDelay: document.getElementById('navSiteDelay'),
-    navSiteAutoStart: document.getElementById('navSiteAutoStart'),
     navSiteNotes: document.getElementById('navSiteNotes'),
-    addNavConfig: document.getElementById('addNavConfig'),
     testSelector: document.getElementById('testSelector'),
-    testResult: document.getElementById('testResult'),
-    navConfigsList: document.getElementById('navConfigsList')
+    testResult: document.getElementById('testResult')
   };
   
   // Setup slider sync for auto-navigate delay
@@ -902,47 +1378,25 @@ function initAutoNavigate() {
     });
   }
   
-  // Add configuration button
-  if (autoNavigateElements.addNavConfig) {
-    autoNavigateElements.addNavConfig.addEventListener('click', () => {
-      const hostname = autoNavigateElements.navSiteHost.value.trim();
-      const selector = autoNavigateElements.navSiteSelector.value.trim();
-      const delay = parseInt(autoNavigateElements.navSiteDelay.value) || 3;
-      const autoStart = autoNavigateElements.navSiteAutoStart.checked;
-      const notes = autoNavigateElements.navSiteNotes.value.trim();
-      
-      if (!hostname || !selector) {
-        showStatusMessage('Please enter both hostname and CSS selector', 'error');
-        return;
-      }
-      
-      // Add or update configuration
-      if (!currentSettings.navigationSelectors) {
-        currentSettings.navigationSelectors = {};
-      }
-      
-      currentSettings.navigationSelectors[hostname] = {
-        selector: selector,
-        enabled: true,
-        delay: delay,
-        autoStart: autoStart,
-        notes: notes
-      };
-      
-      // Save settings
-      saveSettings().then(() => {
-        showStatusMessage(`Configuration saved for ${hostname}`, 'success');
-        
-        // Clear form
-        autoNavigateElements.navSiteHost.value = '';
-        autoNavigateElements.navSiteSelector.value = '';
-        autoNavigateElements.navSiteDelay.value = '3';
-        autoNavigateElements.navSiteAutoStart.checked = true;
-        autoNavigateElements.navSiteNotes.value = '';
-        
-        // Update UI
-        renderNavigationConfigs();
-      });
+  // Selector changes trigger autosave
+  if (autoNavigateElements.navSiteSelector) {
+    autoNavigateElements.navSiteSelector.addEventListener('input', () => {
+      debouncedAutoSave();
+    });
+  }
+  
+  if (autoNavigateElements.navSiteNotes) {
+    autoNavigateElements.navSiteNotes.addEventListener('input', () => {
+      debouncedAutoSave();
+    });
+  }
+  
+  // Save selector button
+  const btnSaveSelector = document.getElementById('btnSaveSelector');
+  if (btnSaveSelector) {
+    btnSaveSelector.addEventListener('click', async () => {
+      await saveCurrentConfig();
+      showStatusMessage('Selector saved successfully!', 'success');
     });
   }
   
@@ -994,8 +1448,7 @@ function initAutoNavigate() {
     });
   }
   
-  // Render existing configurations
-  renderNavigationConfigs();
+  // Navigation selector is rendered as part of updateUI()
   
   // Setup element picker button
   const activateElementPicker = document.getElementById('activateElementPicker');
@@ -1004,15 +1457,12 @@ function initAutoNavigate() {
       try {
         // Simply store a flag in background that we're waiting for an element
         // We don't need to store the tab ID - the background script will handle returning
-        console.log('Sending startElementPicking message to background...');
         const response = await browser.runtime.sendMessage({
           action: 'startElementPicking'
         });
-        console.log('startElementPicking response:', response);
         
         // Get all tabs to activate picker on them
         const allTabs = await browser.tabs.query({});
-        console.log('All tabs:', allTabs.map(t => ({ id: t.id, url: t.url })));
         
         // Find non-options tabs
         const websiteTabs = allTabs.filter(t => 
@@ -1022,7 +1472,6 @@ function initAutoNavigate() {
           !t.url.includes('about:') &&
           !t.url.includes('moz-extension:')
         );
-        console.log('Website tabs:', websiteTabs);
         
         if (websiteTabs.length === 0) {
           showStatusMessage('Please open a website in another tab first', 'error');
@@ -1033,16 +1482,13 @@ function initAutoNavigate() {
         let activatedCount = 0;
         for (const tab of websiteTabs) {
           try {
-            console.log('Activating picker on tab:', tab.id, tab.url);
             const response = await browser.tabs.sendMessage(tab.id, {
               action: 'activateElementPicker'
             });
-            console.log('Response from tab', tab.id, ':', response);
             if (response && response.success) {
               activatedCount++;
             }
           } catch (error) {
-            console.log('Could not activate picker on tab', tab.id, ':', error.message);
           }
         }
         
@@ -1061,72 +1507,127 @@ function initAutoNavigate() {
 }
 
 // Handle element picked message
-function handleElementPicked(message) {
-  console.log('==========================================');
-  console.log('HANDLING ELEMENT PICKED');
-  console.log('Message:', message);
-  console.log('==========================================');
-  
+async function handleElementPicked(message) {
   if (message.action === 'elementPicked') {
+    console.log('=== handleElementPicked called ===');
+    console.log('Message:', JSON.stringify(message, null, 2));
+    
     // Element was picked, fill in the form
     const elementInfo = message.elementInfo;
-    console.log('Processing elementPicked:', elementInfo);
     
-    const navSiteHost = document.getElementById('navSiteHost');
-    const navSiteSelector = document.getElementById('navSiteSelector');
+    if (!elementInfo) {
+      console.error('No elementInfo in message');
+      showStatusMessage('Error: No element info received', 'error');
+      return;
+    }
     
-    console.log('navSiteHost element:', navSiteHost);
-    console.log('navSiteSelector element:', navSiteSelector);
+    const hostname = elementInfo.hostname;
+    const selector = elementInfo.selector;
     
-    if (navSiteHost && navSiteSelector) {
-      navSiteHost.value = elementInfo.hostname;
-      navSiteSelector.value = elementInfo.selector;
-      console.log('Form fields filled in:', navSiteHost.value, navSiteSelector.value);
+    console.log('Element hostname:', hostname);
+    console.log('Element selector:', selector);
+    console.log('Current domain:', currentDomain);
+    console.log('Whitelist:', whitelist);
+    
+    // If hostname is in whitelist but not currently selected, switch to it
+    if (whitelist.includes(hostname) && currentDomain !== hostname) {
+      console.log('Need to switch to domain:', hostname);
+      await switchToDomain(hostname);
+      console.log('Switched to domain:', currentDomain);
+    } else if (!whitelist.includes(hostname)) {
+      console.warn('Hostname not in whitelist:', hostname);
+      showStatusMessage(`Warning: ${hostname} is not whitelisted. Add it to the whitelist first.`, 'error', 5000);
+      return;
+    }
+    
+    // Update the current config's navigationSelector BEFORE switching tabs
+    console.log('Updating currentConfig.navigationSelector');
+    if (!currentConfig.navigationSelector) {
+      currentConfig.navigationSelector = {};
+    }
+    currentConfig.navigationSelector.selector = selector;
+    console.log('Updated config:', currentConfig.navigationSelector);
+    
+    // Switch to the Auto-Navigate tab
+    const autonavigateTab = document.querySelector('.tab[data-tab="autonavigate"]');
+    console.log('Auto-Navigate tab found:', !!autonavigateTab);
+    
+    if (autonavigateTab) {
+      console.log('Clicking Auto-Navigate tab');
+      autonavigateTab.click();
       
-      // Expand the auto-navigate section if collapsed
-      const autoNavigateSection = document.getElementById('autoNavigateSection');
-      if (autoNavigateSection) {
-        autoNavigateSection.classList.remove('collapsed');
-        console.log('Section expanded');
-        // Scroll into view
-        setTimeout(() => {
-          autoNavigateSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
-        }, 100);
+      // Wait for tab to render
+      await new Promise(resolve => setTimeout(resolve, 100));
+      console.log('Tab should be visible now');
+    } else {
+      console.error('Auto-Navigate tab not found in DOM');
+    }
+    
+    // Now update the UI which will populate the selector field
+    console.log('Calling updateUI()');
+    updateUI();
+    
+    // Verify the field was populated
+    const navSiteSelector = document.getElementById('navSiteSelector');
+    console.log('navSiteSelector element:', navSiteSelector);
+    console.log('navSiteSelector value:', navSiteSelector?.value);
+    
+    if (navSiteSelector) {
+      // If value is still empty, set it directly as a fallback
+      if (!navSiteSelector.value) {
+        console.warn('Field still empty after updateUI, setting directly');
+        navSiteSelector.value = selector;
       }
       
-      showStatusMessage('Element captured! Review and click "Add Configuration" to save.', 'success', 5000);
+      // Save the config directly (don't use debouncedAutoSave which reads from UI)
+      console.log('Saving config directly');
+      await saveCurrentConfig();
+      
+      // Scroll to the selector section
+      setTimeout(() => {
+        const selectorSection = document.querySelector('.element-picker-section');
+        if (selectorSection) {
+          console.log('Scrolling to selector section');
+          selectorSection.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }
+      }, 200);
+      
+      showStatusMessage('Element captured and saved!', 'success', 5000);
+      console.log('=== handleElementPicked completed successfully ===');
     } else {
-      console.error('Form fields not found');
-      showStatusMessage('Error: Could not find form fields', 'error');
+      console.error('navSiteSelector not found in DOM after tab switch');
+      showStatusMessage('Error: Could not find selector field', 'error');
     }
   }
 }
 
 // Listen for element picked message via runtime.onMessage (for tabs)
 browser.runtime.onMessage.addListener((message, sender, sendResponse) => {
-  console.log('OPTIONS PAGE RECEIVED runtime.onMessage:', message);
-  handleElementPicked(message);
-  sendResponse({ success: true });
-  return true;
+  // Only handle elementPicked messages, ignore everything else
+  if (message.action === 'elementPicked') {
+    handleElementPicked(message);
+    sendResponse({ success: true });
+    return true;
+  }
+  
+  // Don't respond to other messages - let background script handle them
+  return false;
 });
 
 // Listen for element picked message via custom event (for popups)
 document.addEventListener('gestureAutoscrollerMessage', (event) => {
-  console.log('OPTIONS PAGE RECEIVED custom event:', event.detail);
   handleElementPicked(event.detail);
 });
 
 // Check for picked element when page becomes visible (in case it was suspended)
 document.addEventListener('visibilitychange', () => {
   if (!document.hidden) {
-    console.log('Page became visible, checking for picked element...');
     checkForPickedElement();
   }
 });
 
 // Also check when window gains focus
 window.addEventListener('focus', () => {
-  console.log('Window gained focus, checking for picked element...');
   checkForPickedElement();
 });
 
@@ -1139,178 +1640,425 @@ function showTestResult(message, type) {
   }
 }
 
-// Render navigation configurations list
-function renderNavigationConfigs() {
-  const navConfigsList = document.getElementById('navConfigsList');
-  if (!navConfigsList) return;
+// ============================================================================
+// PRESET MANAGEMENT
+// ============================================================================
+
+// Load presets from storage
+async function loadPresets() {
+  try {
+    const response = await browser.runtime.sendMessage({
+      action: 'getPresets'
+    });
+    
+    if (response && response.success) {
+      presets = response.presets || {};
+    } else {
+      presets = {};
+    }
+  } catch (error) {
+    console.error('Failed to load presets:', error);
+    presets = {};
+  }
+}
+
+// Setup preset button event listeners
+function setupPresetListeners() {
+  const btnSavePreset = document.getElementById('btnSavePreset');
+  const btnLoadPreset = document.getElementById('btnLoadPreset');
+  const btnManagePresets = document.getElementById('btnManagePresets');
+  const btnConfirmSavePreset = document.getElementById('btnConfirmSavePreset');
+  const btnConfirmRenamePreset = document.getElementById('btnConfirmRenamePreset');
+  const presetNameInput = document.getElementById('presetNameInput');
   
-  // Ensure currentSettings is loaded
-  if (!currentSettings) return;
+  if (btnSavePreset) {
+    btnSavePreset.addEventListener('click', openSavePresetModal);
+  }
   
-  const configs = currentSettings.navigationSelectors || {};
-  const hostnames = Object.keys(configs);
+  if (btnLoadPreset) {
+    btnLoadPreset.addEventListener('click', openLoadPresetModal);
+  }
   
-  if (hostnames.length === 0) {
-    navConfigsList.innerHTML = '<div class="nav-configs-empty">No site configurations yet. Add your first one above!</div>';
+  if (btnManagePresets) {
+    btnManagePresets.addEventListener('click', openManagePresetsModal);
+  }
+  
+  if (btnConfirmSavePreset) {
+    btnConfirmSavePreset.addEventListener('click', confirmSavePreset);
+  }
+  
+  if (btnConfirmRenamePreset) {
+    btnConfirmRenamePreset.addEventListener('click', confirmRenamePreset);
+  }
+  
+  // Enter key in preset name input
+  if (presetNameInput) {
+    presetNameInput.addEventListener('keypress', (e) => {
+      if (e.key === 'Enter') {
+        confirmSavePreset();
+      }
+    });
+  }
+  
+  // Close modals when clicking overlay
+  document.querySelectorAll('.modal-overlay').forEach(overlay => {
+    overlay.addEventListener('click', (e) => {
+      if (e.target === overlay) {
+        closeAllModals();
+      }
+    });
+  });
+  
+  // Setup close buttons for all modals
+  const modalCloseButtons = document.querySelectorAll('.modal-close');
+  modalCloseButtons.forEach(button => {
+    button.addEventListener('click', () => {
+      // Find which modal this button belongs to and close it
+      const modal = button.closest('.modal-overlay');
+      if (modal) {
+        modal.classList.remove('show');
+      }
+    });
+  });
+  
+  // Setup cancel buttons for modals
+  const modalCancelButtons = document.querySelectorAll('.btn-modal-secondary');
+  modalCancelButtons.forEach(button => {
+    button.addEventListener('click', () => {
+      // Find which modal this button belongs to and close it
+      const modal = button.closest('.modal-overlay');
+      if (modal) {
+        modal.classList.remove('show');
+      }
+    });
+  });
+}
+
+// Open save preset modal
+function openSavePresetModal() {
+  const modal = document.getElementById('savePresetModal');
+  const input = document.getElementById('presetNameInput');
+  
+  if (modal && input) {
+    input.value = '';
+    modal.classList.add('show');
+    input.focus();
+  }
+}
+
+// Close save preset modal
+function closeSavePresetModal() {
+  const modal = document.getElementById('savePresetModal');
+  if (modal) {
+    modal.classList.remove('show');
+  }
+}
+
+// Confirm save preset
+async function confirmSavePreset() {
+  const input = document.getElementById('presetNameInput');
+  const name = input.value.trim();
+  
+  if (!name) {
+    showStatusMessage('Please enter a preset name', 'error');
     return;
   }
   
-  navConfigsList.innerHTML = hostnames.map(hostname => {
-    const config = configs[hostname];
-    return `
-      <div class="nav-config-item" data-hostname="${hostname}">
-        <div class="config-header">
-          <div class="config-hostname">
-            <strong>${hostname}</strong>
-            <span class="config-status ${config.enabled ? 'enabled' : 'disabled'}">
-              ${config.enabled ? 'Enabled' : 'Disabled'}
-            </span>
-          </div>
-          <div class="config-actions">
-            <button class="btn-icon edit-config" data-hostname="${hostname}" title="Edit">✏️</button>
-            <button class="btn-icon delete-config" data-hostname="${hostname}" title="Delete">🗑️</button>
-          </div>
-        </div>
-        
-        <div class="config-details">
-          <div class="config-row">
-            <span class="config-label">Selector:</span>
-            <span class="config-value"><code>${config.selector}</code></span>
-          </div>
-          <div class="config-row">
-            <span class="config-label">Delay:</span>
-            <span class="config-value">${config.delay} seconds</span>
-          </div>
-          <div class="config-row">
-            <span class="config-label">Auto-start:</span>
-            <span class="config-value">${config.autoStart ? 'Yes' : 'No'}</span>
-          </div>
-          ${config.notes ? `
-          <div class="config-row">
-            <span class="config-label">Notes:</span>
-            <span class="config-value">${config.notes}</span>
-          </div>
-          ` : ''}
-        </div>
-        
-        <div class="config-edit-form" style="display: none;">
-          <div class="form-group">
-            <label>CSS Selector</label>
-            <input type="text" class="edit-selector" value="${config.selector}">
-          </div>
-          <div class="form-group">
-            <label>Countdown Delay (seconds)</label>
-            <input type="number" class="edit-delay" value="${config.delay}" min="1" max="30">
-          </div>
-          <div class="form-group">
-            <label>
-              <input type="checkbox" class="edit-autostart" ${config.autoStart ? 'checked' : ''}>
-              Auto-start scrolling on new page
-            </label>
-          </div>
-          <div class="form-group">
-            <label>Notes (optional)</label>
-            <input type="text" class="edit-notes" value="${config.notes || ''}">
-          </div>
-          <div class="form-group">
-            <label>
-              <input type="checkbox" class="edit-enabled" ${config.enabled ? 'checked' : ''}>
-              Enable for this site
-            </label>
-          </div>
-          <div class="form-actions">
-            <button class="btn-primary save-config" data-hostname="${hostname}">Save</button>
-            <button class="btn-secondary cancel-edit" data-hostname="${hostname}">Cancel</button>
-          </div>
-        </div>
-      </div>
-    `;
-  }).join('');
+  // Check if preset already exists
+  if (presets[name]) {
+    if (!confirm(`A preset named "${name}" already exists. Do you want to overwrite it?`)) {
+      return;
+    }
+  }
   
-  // Attach event listeners to dynamically created elements
-  attachNavConfigEventListeners();
+  try {
+    // Get current config and remove navigationSelector
+    const { navigationSelector, ...presetConfig } = currentConfig;
+    
+    const response = await browser.runtime.sendMessage({
+      action: 'savePreset',
+      name: name,
+      config: presetConfig
+    });
+    
+    if (response && response.success) {
+      // Update local presets
+      presets[name] = presetConfig;
+      
+      showStatusMessage(`Preset "${name}" saved successfully`, 'success');
+      closeSavePresetModal();
+    } else {
+      showStatusMessage(response.error || 'Failed to save preset', 'error');
+    }
+  } catch (error) {
+    console.error('Failed to save preset:', error);
+    showStatusMessage('Failed to save preset', 'error');
+  }
 }
 
-// Attach event listeners to navigation config items
-function attachNavConfigEventListeners() {
-  // Edit buttons
-  document.querySelectorAll('.edit-config').forEach(button => {
-    button.addEventListener('click', () => {
-      const hostname = button.getAttribute('data-hostname');
-      const item = document.querySelector(`.nav-config-item[data-hostname="${hostname}"]`);
-      if (item) {
-        const editForm = item.querySelector('.config-edit-form');
-        const details = item.querySelector('.config-details');
-        if (editForm && details) {
-          details.style.display = 'none';
-          editForm.style.display = 'block';
-        }
-      }
-    });
-  });
+// Open load preset modal
+function openLoadPresetModal() {
+  const modal = document.getElementById('loadPresetModal');
+  const list = document.getElementById('loadPresetList');
   
-  // Delete buttons
-  document.querySelectorAll('.delete-config').forEach(button => {
-    button.addEventListener('click', () => {
-      const hostname = button.getAttribute('data-hostname');
-      if (confirm(`Delete configuration for ${hostname}?`)) {
-        delete currentSettings.navigationSelectors[hostname];
-        saveSettings().then(() => {
-          showStatusMessage(`Configuration deleted for ${hostname}`, 'success');
-          renderNavigationConfigs();
-        });
-      }
-    });
-  });
+  if (modal && list) {
+    renderLoadPresetList();
+    modal.classList.add('show');
+  }
+}
+
+// Close load preset modal
+function closeLoadPresetModal() {
+  const modal = document.getElementById('loadPresetModal');
+  if (modal) {
+    modal.classList.remove('show');
+  }
+}
+
+// Render preset list in load modal
+function renderLoadPresetList() {
+  const list = document.getElementById('loadPresetList');
+  if (!list) return;
   
-  // Save buttons
-  document.querySelectorAll('.save-config').forEach(button => {
-    button.addEventListener('click', () => {
-      const hostname = button.getAttribute('data-hostname');
-      const item = document.querySelector(`.nav-config-item[data-hostname="${hostname}"]`);
-      if (item) {
-        const selector = item.querySelector('.edit-selector').value.trim();
-        const delay = parseInt(item.querySelector('.edit-delay').value) || 3;
-        const autoStart = item.querySelector('.edit-autostart').checked;
-        const notes = item.querySelector('.edit-notes').value.trim();
-        const enabled = item.querySelector('.edit-enabled').checked;
-        
-        if (!selector) {
-          showStatusMessage('Selector cannot be empty', 'error');
-          return;
-        }
-        
-        currentSettings.navigationSelectors[hostname] = {
-          selector: selector,
-          enabled: enabled,
-          delay: delay,
-          autoStart: autoStart,
-          notes: notes
-        };
-        
-        saveSettings().then(() => {
-          showStatusMessage(`Configuration updated for ${hostname}`, 'success');
-          renderNavigationConfigs();
-        });
-      }
-    });
-  });
+  const presetNames = Object.keys(presets);
   
-  // Cancel buttons
-  document.querySelectorAll('.cancel-edit').forEach(button => {
-    button.addEventListener('click', () => {
-      const hostname = button.getAttribute('data-hostname');
-      const item = document.querySelector(`.nav-config-item[data-hostname="${hostname}"]`);
-      if (item) {
-        const editForm = item.querySelector('.config-edit-form');
-        const details = item.querySelector('.config-details');
-        if (editForm && details) {
-          editForm.style.display = 'none';
-          details.style.display = 'block';
-        }
-      }
-    });
+  if (presetNames.length === 0) {
+    list.innerHTML = '<div class="preset-list-empty">No presets saved yet. Save your first preset to get started!</div>';
+    return;
+  }
+  
+  list.innerHTML = '';
+  
+  presetNames.sort().forEach(name => {
+    const item = document.createElement('div');
+    item.className = 'preset-item';
+    
+    const nameSpan = document.createElement('span');
+    nameSpan.className = 'preset-item-name';
+    nameSpan.textContent = name;
+    
+    const loadBtn = document.createElement('button');
+    loadBtn.className = 'btn-preset-action btn-preset-load';
+    loadBtn.textContent = 'Load';
+    loadBtn.onclick = () => loadPreset(name);
+    
+    item.appendChild(nameSpan);
+    item.appendChild(loadBtn);
+    list.appendChild(item);
   });
+}
+
+// Load a preset
+async function loadPreset(name) {
+  if (!presets[name]) {
+    showStatusMessage('Preset not found', 'error');
+    return;
+  }
+  
+  try {
+    // Get preset config
+    const presetConfig = presets[name];
+    
+    // Merge preset with current config, preserving navigationSelector
+    const newConfig = {
+      ...presetConfig,
+      navigationSelector: currentConfig.navigationSelector
+    };
+    
+    // Update current config
+    currentConfig = newConfig;
+    
+    // Update UI
+    updateUI();
+    
+    // Save the updated config
+    await saveCurrentConfig();
+    
+    showStatusMessage(`Preset "${name}" loaded successfully`, 'success');
+    closeLoadPresetModal();
+  } catch (error) {
+    console.error('Failed to load preset:', error);
+    showStatusMessage('Failed to load preset', 'error');
+  }
+}
+
+// Open manage presets modal
+function openManagePresetsModal() {
+  const modal = document.getElementById('managePresetsModal');
+  const list = document.getElementById('managePresetList');
+  
+  if (modal && list) {
+    renderManagePresetList();
+    modal.classList.add('show');
+  }
+}
+
+// Close manage presets modal
+function closeManagePresetsModal() {
+  const modal = document.getElementById('managePresetsModal');
+  if (modal) {
+    modal.classList.remove('show');
+  }
+}
+
+// Render preset list in manage modal
+function renderManagePresetList() {
+  const list = document.getElementById('managePresetList');
+  if (!list) return;
+  
+  const presetNames = Object.keys(presets);
+  
+  if (presetNames.length === 0) {
+    list.innerHTML = '<div class="preset-list-empty">No presets saved yet. Save your first preset to get started!</div>';
+    return;
+  }
+  
+  list.innerHTML = '';
+  
+  presetNames.sort().forEach(name => {
+    const item = document.createElement('div');
+    item.className = 'preset-item';
+    
+    const nameSpan = document.createElement('span');
+    nameSpan.className = 'preset-item-name';
+    nameSpan.textContent = name;
+    
+    const actions = document.createElement('div');
+    actions.className = 'preset-item-actions';
+    
+    const loadBtn = document.createElement('button');
+    loadBtn.className = 'btn-preset-action btn-preset-load';
+    loadBtn.textContent = 'Load';
+    loadBtn.onclick = () => {
+      loadPreset(name);
+      closeManagePresetsModal();
+    };
+    
+    const renameBtn = document.createElement('button');
+    renameBtn.className = 'btn-preset-action btn-preset-rename';
+    renameBtn.textContent = 'Rename';
+    renameBtn.onclick = () => openRenamePresetModal(name);
+    
+    const deleteBtn = document.createElement('button');
+    deleteBtn.className = 'btn-preset-action btn-preset-delete';
+    deleteBtn.textContent = 'Delete';
+    deleteBtn.onclick = () => deletePreset(name);
+    
+    actions.appendChild(loadBtn);
+    actions.appendChild(renameBtn);
+    actions.appendChild(deleteBtn);
+    
+    item.appendChild(nameSpan);
+    item.appendChild(actions);
+    list.appendChild(item);
+  });
+}
+
+// Delete a preset
+async function deletePreset(name) {
+  if (!confirm(`Are you sure you want to delete the preset "${name}"?`)) {
+    return;
+  }
+  
+  try {
+    const response = await browser.runtime.sendMessage({
+      action: 'deletePreset',
+      name: name
+    });
+    
+    if (response && response.success) {
+      // Update local presets
+      delete presets[name];
+      
+      showStatusMessage(`Preset "${name}" deleted successfully`, 'success');
+      
+      // Refresh the manage list
+      renderManagePresetList();
+    } else {
+      showStatusMessage(response.error || 'Failed to delete preset', 'error');
+    }
+  } catch (error) {
+    console.error('Failed to delete preset:', error);
+    showStatusMessage('Failed to delete preset', 'error');
+  }
+}
+
+// Open rename preset modal
+function openRenamePresetModal(oldName) {
+  const modal = document.getElementById('renamePresetModal');
+  const input = document.getElementById('renamePresetInput');
+  
+  if (modal && input) {
+    input.value = oldName;
+    input.dataset.oldName = oldName;
+    modal.classList.add('show');
+    input.focus();
+    input.select();
+  }
+}
+
+// Close rename preset modal
+function closeRenamePresetModal() {
+  const modal = document.getElementById('renamePresetModal');
+  if (modal) {
+    modal.classList.remove('show');
+  }
+}
+
+// Confirm rename preset
+async function confirmRenamePreset() {
+  const input = document.getElementById('renamePresetInput');
+  const oldName = input.dataset.oldName;
+  const newName = input.value.trim();
+  
+  if (!newName) {
+    showStatusMessage('Please enter a preset name', 'error');
+    return;
+  }
+  
+  if (newName === oldName) {
+    closeRenamePresetModal();
+    return;
+  }
+  
+  // Check if new name already exists
+  if (presets[newName]) {
+    showStatusMessage('A preset with this name already exists', 'error');
+    return;
+  }
+  
+  try {
+    const response = await browser.runtime.sendMessage({
+      action: 'renamePreset',
+      oldName: oldName,
+      newName: newName
+    });
+    
+    if (response && response.success) {
+      // Update local presets
+      presets[newName] = presets[oldName];
+      delete presets[oldName];
+      
+      showStatusMessage(`Preset renamed to "${newName}" successfully`, 'success');
+      closeRenamePresetModal();
+      
+      // Refresh the manage list
+      renderManagePresetList();
+    } else {
+      showStatusMessage(response.error || 'Failed to rename preset', 'error');
+    }
+  } catch (error) {
+    console.error('Failed to rename preset:', error);
+    showStatusMessage('Failed to rename preset', 'error');
+  }
+}
+
+// Close all modals
+function closeAllModals() {
+  closeSavePresetModal();
+  closeLoadPresetModal();
+  closeManagePresetsModal();
+  closeRenamePresetModal();
 }
 
 

@@ -22,8 +22,7 @@
     granularity: 10,       // px/sec
     tapScrollPercentage: 100,   // Percentage of viewport height to scroll (10-100%)
     tapZoneLayout: 'horizontal', // Options: 'horizontal', 'vertical'
-    tapZoneUpPercentage: 50,    // Size of scroll-up zone (10-90%)
-    whitelistedHosts: []
+    tapZoneUpPercentage: 50     // Size of scroll-up zone (10-90%)
   };
   
   // Current settings
@@ -113,15 +112,21 @@
     }
   }
   
-  // Load settings from storage
+  // Load settings from storage (per-domain)
   async function loadSettings() {
     try {
-      const result = await browser.storage.local.get('gesture_autoscroller_settings');
+      const hostname = window.location.hostname;
       
-      if (result.gesture_autoscroller_settings) {
+      // Request domain-specific configuration from background script
+      const response = await browser.runtime.sendMessage({
+        action: 'getSettings',
+        host: hostname
+      });
+      
+      if (response && response.success && response.config) {
         settings = {
           ...DEFAULT_SETTINGS,
-          ...result.gesture_autoscroller_settings
+          ...response.config
         };
       }
     } catch (error) {
@@ -129,15 +134,19 @@
     }
   }
   
-  // Save current speed to storage
+  // Save current speed to storage (per-domain)
   async function saveCurrentSpeedToStorage(newSpeed) {
     try {
+      const hostname = window.location.hostname;
+      
       // Update local settings
       settings.defaultSpeed = newSpeed;
       
-      // Save to browser storage
-      await browser.storage.local.set({
-        gesture_autoscroller_settings: settings
+      // Save to browser storage (domain-specific)
+      await browser.runtime.sendMessage({
+        action: 'saveDomainConfig',
+        hostname: hostname,
+        config: settings
       });
     } catch (error) {
       console.error('Failed to save speed:', error);
@@ -148,21 +157,18 @@
   async function isHostWhitelisted() {
     const currentHost = window.location.hostname;
     
-    // If whitelist is empty, extension is inactive
-    if (!settings.whitelistedHosts || settings.whitelistedHosts.length === 0) {
+    try {
+      // Ask background script if this host is whitelisted
+      const response = await browser.runtime.sendMessage({
+        action: 'isHostWhitelisted',
+        host: currentHost
+      });
+      
+      return response && response.success && response.isWhitelisted;
+    } catch (error) {
+      console.error('Failed to check whitelist:', error);
       return false;
     }
-    
-    // Check if current host matches any whitelisted host
-    return settings.whitelistedHosts.some(whitelistedHost => {
-      // Exact match
-      if (currentHost === whitelistedHost) return true;
-      
-      // Subdomain match (e.g., "example.com" matches "www.example.com")
-      if (currentHost.endsWith('.' + whitelistedHost)) return true;
-      
-      return false;
-    });
   }
   
   // Activate extension features
@@ -202,41 +208,45 @@
   async function toggleExtensionForCurrentSite() {
     const currentHost = window.location.hostname;
     
+    // Get current whitelist from new storage schema
+    const result = await browser.storage.local.get('gesture_autoscroller_whitelist');
+    const whitelist = result.gesture_autoscroller_whitelist || [];
+    
     // Check if current host is in whitelist
-    const isCurrentlyWhitelisted = settings.whitelistedHosts && 
-                                    settings.whitelistedHosts.includes(currentHost);
+    const isCurrentlyWhitelisted = whitelist.includes(currentHost);
     
     if (isCurrentlyWhitelisted) {
-      // Remove from whitelist
-      settings.whitelistedHosts = settings.whitelistedHosts.filter(host => host !== currentHost);
-      
-      // Save updated settings
-      await browser.storage.local.set({
-        gesture_autoscroller_settings: settings
+      // Remove from whitelist via background script
+      const response = await browser.runtime.sendMessage({
+        action: 'removeFromWhitelist',
+        hostname: currentHost
       });
       
-      // Deactivate extension
-      deactivateExtension();
-      
-      // Show confirmation
-      showToast(`Disabled for ${currentHost}`, 2500);
-    } else {
-      // Add to whitelist
-      if (!settings.whitelistedHosts) {
-        settings.whitelistedHosts = [];
+      if (response && response.success) {
+        // Deactivate extension
+        deactivateExtension();
+        
+        // Show confirmation
+        showToast(`Disabled for ${currentHost}`, 2500);
+      } else {
+        showToast(`Failed to disable for ${currentHost}`, 2500);
       }
-      settings.whitelistedHosts.push(currentHost);
-      
-      // Save updated settings
-      await browser.storage.local.set({
-        gesture_autoscroller_settings: settings
+    } else {
+      // Add to whitelist via background script
+      const response = await browser.runtime.sendMessage({
+        action: 'addToWhitelist',
+        hostname: currentHost
       });
       
-      // Activate extension
-      activateExtension();
-      
-      // Show confirmation
-      showToast(`Enabled for ${currentHost}`, 2500);
+      if (response && response.success) {
+        // Activate extension
+        activateExtension();
+        
+        // Show confirmation
+        showToast(`Enabled for ${currentHost}`, 2500);
+      } else {
+        showToast(`Failed to enable for ${currentHost}`, 2500);
+      }
     }
   }
   
@@ -659,6 +669,19 @@
   
   // Handle tap event
   function handleTap(event) {
+    // Check for four-finger tap (activate element picker) - MOBILE ONLY
+    // This works when extension is active on the current site
+    if (fingerCount === 4 && 'ontouchstart' in window) {
+      // Four-finger tap detected on mobile
+      if (isExtensionActive) {
+        // Don't show toast - the picker has its own UI banner with instructions
+        activateElementPicker();
+      } else {
+        showToast('Add this site to whitelist first (3-finger tap)', 3000);
+      }
+      return;
+    }
+    
     // Check for three-finger tap (toggle extension for current site) - MOBILE ONLY
     // This ALWAYS works, even when extension is not active
     if (fingerCount === 3 && 'ontouchstart' in window) {
@@ -1080,17 +1103,14 @@
   
   // Handle reaching bottom of page
   function handleReachedBottom() {
-    // Check if auto-navigate is enabled
+    // Check if auto-navigate is enabled for this domain
     if (!settings.autoNavigateEnabled) {
       showToast('Reached end of page', 2000);
       return;
     }
     
-    // Get current hostname
-    const hostname = window.location.hostname;
-    
-    // Check if there's a configured selector for this site
-    const siteConfig = settings.navigationSelectors && settings.navigationSelectors[hostname];
+    // Check if there's a configured selector for this domain
+    const siteConfig = settings.navigationSelector;
     
     if (!siteConfig || !siteConfig.enabled) {
       showToast('Reached end of page', 2000);
@@ -1229,8 +1249,6 @@
       this.accumulatedScroll = 0;
       this.targetScrollPosition = 0; // For smooth scrolling approach
       this.usesSmoothScroll = false; // Flag to track which method we're using
-      this.previousScrollTop = 0; // Track previous scroll position to detect if we're stuck
-      this.stuckCounter = 0; // Count how many frames we haven't moved
     }
     
     // Update config (for when settings change)
@@ -1330,8 +1348,6 @@
     startScrolling() {
       this.lastScrollTime = performance.now();
       this.accumulatedScroll = 0;
-      this.previousScrollTop = window.pageYOffset || window.scrollY || document.documentElement.scrollTop || 0;
-      this.stuckCounter = 0;
       
       // For low speeds, use smooth scroll with continuously updated target
       this.usesSmoothScroll = this.currentSpeed < 60;
@@ -1359,27 +1375,7 @@
         return;
       }
       
-      // Get current scroll position to check if we're making progress
-      const currentScrollTop = window.pageYOffset || window.scrollY || document.documentElement.scrollTop || 0;
-      
-      // Check if scroll position hasn't changed for multiple frames (we're stuck at bottom)
-      if (Math.abs(currentScrollTop - this.previousScrollTop) < 0.5) {
-        this.stuckCounter++;
-        // If stuck for 10 consecutive frames, we're at the bottom
-        if (this.stuckCounter >= 10) {
-          this.stop();
-          handleReachedBottom();
-          return;
-        }
-      } else {
-        // We're moving, reset the stuck counter
-        this.stuckCounter = 0;
-      }
-      
-      // Update previous scroll position for next frame
-      this.previousScrollTop = currentScrollTop;
-      
-      // Also check if we've reached the bottom using the calculation (backup check)
+      // Check if we've reached the bottom of the page BEFORE scrolling
       if (this.isAtBottom()) {
         this.stop();
         handleReachedBottom();
@@ -1563,6 +1559,7 @@
   let pickerOverlay = null;
   let pickerHighlight = null;
   let pickerTarget = null;
+  let pickerReadyToSelect = false; // Flag to prevent immediate selection after activation
   
   // Activate element picker mode
   function activateElementPicker() {
@@ -1574,7 +1571,16 @@
     }
     
     elementPickerActive = true;
+    pickerReadyToSelect = false; // Not ready yet - need to wait for activation touches to clear
     console.log('Setting elementPickerActive to true');
+    
+    // Notify background script that element picking has started
+    browser.runtime.sendMessage({
+      action: 'startElementPicking'
+    }).catch(error => {
+      console.log('Failed to notify background of element picking start:', error);
+      // Continue anyway - the background script now accepts elementPicked without this flag
+    });
     
     // Hide any existing toasts
     if (toastElement) {
@@ -1655,6 +1661,12 @@
     document.addEventListener('click', handlePickerClick, true);
     document.addEventListener('touchend', handlePickerTouchEnd, true);
     
+    // Wait for 500ms before allowing selection (prevents immediate selection from activation gesture)
+    setTimeout(() => {
+      pickerReadyToSelect = true;
+      console.log('Picker ready to select elements');
+    }, 500);
+    
     // Cancel button handler
     cancelBtn.addEventListener('touchend', (e) => {
       e.preventDefault();
@@ -1678,6 +1690,7 @@
     if (!elementPickerActive) return;
     
     elementPickerActive = false;
+    pickerReadyToSelect = false; // Reset the ready flag
     
     // Remove event listeners
     document.removeEventListener('mousemove', handlePickerMouseMove, true);
@@ -1769,6 +1782,13 @@
       return; // Let the cancel button handle its own event
     }
     
+    // Don't process selection if picker isn't ready yet
+    if (!pickerReadyToSelect) {
+      event.preventDefault();
+      event.stopPropagation();
+      return;
+    }
+    
     event.preventDefault();
     event.stopPropagation();
     
@@ -1810,6 +1830,14 @@
     // Check if it's the cancel button
     if (event.target && event.target.id === 'gesture-autoscroller-picker-cancel') {
       return; // Let the cancel button handle its own event
+    }
+    
+    // Don't process selection if picker isn't ready yet (prevents immediate selection from activation gesture)
+    if (!pickerReadyToSelect) {
+      console.log('Picker not ready to select yet, ignoring touch');
+      event.preventDefault();
+      event.stopPropagation();
+      return;
     }
     
     event.preventDefault();
@@ -1900,8 +1928,13 @@
   
   // Listen for messages from options page (settings updates)
   browser.runtime.onMessage.addListener((message, sender, sendResponse) => {
-    if (message.action === 'settingsUpdated') {
-      settings = message.settings;
+    if (message.action === 'settingsUpdated' || message.action === 'configUpdated') {
+      // Handle both legacy 'settingsUpdated' and new 'configUpdated' messages
+      if (message.settings) {
+        settings = message.settings;
+      } else if (message.config) {
+        settings = message.config;
+      }
       
       // Re-check if extension should be active
       isHostWhitelisted().then(isWhitelisted => {
