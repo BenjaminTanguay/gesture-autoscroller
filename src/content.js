@@ -20,6 +20,9 @@
     minSpeed: 1,           // px/sec
     maxSpeed: 3000,        // px/sec
     granularity: 10,       // px/sec
+    tapScrollPercentage: 100,   // Percentage of viewport height to scroll (10-100%)
+    tapZoneLayout: 'horizontal', // Options: 'horizontal', 'vertical'
+    tapZoneUpPercentage: 50,    // Size of scroll-up zone (10-90%)
     whitelistedHosts: []
   };
   
@@ -76,6 +79,17 @@
   // Desktop scroll activation tracking
   let lastScrollTime = 0;
   let scrollActivationThreshold = 100; // pixels scrolled down to activate
+  
+  // Tap scroll lock (prevents duplicate taps during smooth scroll)
+  let isTapScrollInProgress = false;
+  let tapScrollAnimationId = null;
+  let tapScrollStartPosition = 0;
+  let tapScrollTargetPosition = 0;
+  let tapScrollStartTime = 0;
+  const TAP_SCROLL_DURATION = 500; // milliseconds for smooth scroll animation
+  
+  // Wake Lock (keeps screen active during autoscroll)
+  let wakeLock = null;
   
   // ============================================================================
   // INITIALIZATION
@@ -155,6 +169,11 @@
   function activateExtension() {
     isExtensionActive = true;
     
+    // Add CSS class to disable text selection
+    if (document.body) {
+      document.body.classList.add('gesture-autoscroller-active');
+    }
+    
     // Touch listeners are already set up in init() for three-finger tap
     // No need to set them up again here
     
@@ -167,6 +186,11 @@
   // Deactivate extension features
   function deactivateExtension() {
     isExtensionActive = false;
+    
+    // Remove CSS class to re-enable text selection
+    if (document.body) {
+      document.body.classList.remove('gesture-autoscroller-active');
+    }
     
     // Keep touch listeners active for three-finger tap functionality
     // Don't remove them here - they should remain active to allow re-enabling with 3-finger tap
@@ -279,21 +303,21 @@
       countdownElement.id = 'gesture-autoscroll-countdown';
       countdownElement.style.cssText = `
         position: fixed;
-        top: 50%;
-        left: 50%;
-        transform: translate(-50%, -50%);
-        background: rgba(102, 126, 234, 0.95);
+        bottom: 20px;
+        right: 20px;
+        transform: none;
+        background: rgba(50, 50, 50, 0.95);
         color: white;
-        padding: 24px 32px;
-        border-radius: 16px;
-        font-size: 48px;
-        font-weight: 700;
+        padding: 12px 24px;
+        border-radius: 8px;
+        font-size: 14px;
+        font-weight: 500;
         font-family: system-ui, -apple-system, sans-serif;
         z-index: 2147483647;
         pointer-events: none;
-        box-shadow: 0 8px 32px rgba(0,0,0,0.3);
+        box-shadow: 0 4px 12px rgba(0,0,0,0.3);
         text-align: center;
-        min-width: 120px;
+        min-width: 60px;
       `;
       
       document.body.appendChild(countdownElement);
@@ -330,27 +354,55 @@
     style.textContent = `
       @keyframes countdown-pulse {
         0% {
-          transform: translate(-50%, -50%) scale(0.8);
+          transform: scale(0.8);
           opacity: 0.5;
         }
         50% {
-          transform: translate(-50%, -50%) scale(1.1);
+          transform: scale(1.1);
         }
         100% {
-          transform: translate(-50%, -50%) scale(1);
+          transform: scale(1);
           opacity: 1;
         }
       }
       
       @keyframes countdown-fadeout {
         from {
-          transform: translate(-50%, -50%) scale(1);
+          transform: scale(1);
           opacity: 1;
         }
         to {
-          transform: translate(-50%, -50%) scale(0.8);
+          transform: scale(0.8);
           opacity: 0;
         }
+      }
+      
+      /* Disable text selection when extension is active */
+      body.gesture-autoscroller-active {
+        -webkit-user-select: none;
+        -moz-user-select: none;
+        -ms-user-select: none;
+        user-select: none;
+        -webkit-touch-callout: none;
+      }
+      
+      /* Prevent overscroll bounce on mobile - always active to prevent white space scrolling */
+      html {
+        overscroll-behavior-y: none;
+      }
+      
+      body {
+        overscroll-behavior-y: none;
+      }
+      
+      /* Allow text selection on interactive elements */
+      body.gesture-autoscroller-active input,
+      body.gesture-autoscroller-active textarea,
+      body.gesture-autoscroller-active [contenteditable] {
+        -webkit-user-select: text;
+        -moz-user-select: text;
+        -ms-user-select: text;
+        user-select: text;
       }
     `;
     document.head.appendChild(style);
@@ -401,8 +453,8 @@
       return;
     }
     
-    // Prevent default scrolling if autoscroll is active
-    if (autoscroller && autoscroller.isActive()) {
+    // Prevent default scrolling if autoscroll is active OR if tap scroll is in progress
+    if ((autoscroller && autoscroller.isActive()) || isTapScrollInProgress) {
       event.preventDefault();
     }
     
@@ -484,6 +536,10 @@
     
     // Detect tap
     if (duration < TAP_MAX_DURATION && absX < TAP_MAX_MOVEMENT && absY < TAP_MAX_MOVEMENT) {
+      // If tap scroll is in progress, prevent default to avoid cancelling the smooth scroll
+      if (isTapScrollInProgress) {
+        event.preventDefault();
+      }
       handleTap(event);
       // Reset continuous gesture tracking
       lastGestureDirection = null;
@@ -526,16 +582,17 @@
   function setupTouchListeners() {
     if ('ontouchstart' in window) {
       // Mobile touch events
+      // Use passive:false for touchend to allow preventDefault() during tap scroll lock
       // Use passive:false for touchmove to allow preventDefault() when autoscroll is active
       window.addEventListener('touchstart', onTouchStart, { passive: true });
       window.addEventListener('touchmove', onTouchMove, { passive: false });
-      window.addEventListener('touchend', onTouchEnd, { passive: true });
+      window.addEventListener('touchend', onTouchEnd, { passive: false });
       window.addEventListener('touchcancel', onTouchCancel, { passive: true });
     } else {
       // Desktop: mouse events for gestures + scroll event for activation
       window.addEventListener('mousedown', onTouchStart, { passive: true });
       window.addEventListener('mousemove', onTouchMove, { passive: true });
-      window.addEventListener('mouseup', onTouchEnd, { passive: true });
+      window.addEventListener('mouseup', onTouchEnd, { passive: false });
       
       // Add scroll listener for desktop activation
       window.addEventListener('wheel', onWheelScroll, { passive: false });
@@ -629,6 +686,13 @@
       return;
     }
     
+    // Check if auto-navigate countdown is active
+    if (autoNavigateCountdownInterval) {
+      cancelAutoNavigateCountdown();
+      showToast('Auto-navigate cancelled', 2000);
+      return;
+    }
+    
     // Single-finger tap behavior
     // If autoscroll is active, tap = pause/resume
     if (autoscroller && autoscroller.isActive()) {
@@ -643,22 +707,41 @@
       return;
     }
     
+    // Prevent tap navigation if a scroll is already in progress (FIX-002)
+    // This prevents double-tap from cancelling the smooth scroll
+    if (isTapScrollInProgress) {
+      return;
+    }
+    
     // Check if tap target is an interactive element
     if (isInteractiveElement(touchStartTarget)) {
       return;
     }
     
-    // Determine if tap is on left or right side of screen
-    const screenWidth = window.innerWidth;
-    const tapX = touchStartX;
-    const isLeftSide = tapX < screenWidth / 2;
+    // Determine scroll direction based on tap zone layout and size
+    const upZonePercentage = settings.tapZoneUpPercentage / 100;
+    let shouldScrollDown = false;
     
-    if (isLeftSide) {
-      // Left side tap = Page up
-      pageUp();
+    if (settings.tapZoneLayout === 'horizontal') {
+      // Horizontal layout: left = up, right = down
+      const screenWidth = window.innerWidth;
+      const upZoneWidth = screenWidth * upZonePercentage;
+      const tapX = touchStartX;
+      shouldScrollDown = (tapX >= upZoneWidth);
     } else {
-      // Right side tap = Page down
+      // Vertical layout: top = up, bottom = down
+      const screenHeight = window.innerHeight;
+      const upZoneHeight = screenHeight * upZonePercentage;
+      const tapY = touchStartY;
+      shouldScrollDown = (tapY >= upZoneHeight);
+    }
+    
+    if (shouldScrollDown) {
+      // Scroll down
       pageDown();
+    } else {
+      // Scroll up
+      pageUp();
     }
   }
   
@@ -703,22 +786,83 @@
     return false;
   }
   
+  // Custom smooth scroll animation using easing function
+  function animateTapScroll(timestamp) {
+    if (!tapScrollStartTime) {
+      tapScrollStartTime = timestamp;
+    }
+    
+    const elapsed = timestamp - tapScrollStartTime;
+    const progress = Math.min(elapsed / TAP_SCROLL_DURATION, 1);
+    
+    // Ease-out cubic easing for smooth deceleration
+    const eased = 1 - Math.pow(1 - progress, 3);
+    
+    // Calculate current position
+    const currentPosition = tapScrollStartPosition + (tapScrollTargetPosition - tapScrollStartPosition) * eased;
+    
+    // Set scroll position (using instant scroll)
+    window.scrollTo({
+      top: currentPosition,
+      left: 0,
+      behavior: 'auto'
+    });
+    
+    // Continue animation if not complete
+    if (progress < 1) {
+      tapScrollAnimationId = requestAnimationFrame(animateTapScroll);
+    } else {
+      // Animation complete - release lock
+      isTapScrollInProgress = false;
+      tapScrollAnimationId = null;
+      tapScrollStartTime = 0;
+    }
+  }
+  
+  // Start a tap scroll animation
+  function startTapScroll(direction) {
+    // Prevent tap if a scroll is already in progress
+    if (isTapScrollInProgress) {
+      return;
+    }
+    
+    // Cancel any existing animation
+    if (tapScrollAnimationId) {
+      cancelAnimationFrame(tapScrollAnimationId);
+      tapScrollAnimationId = null;
+    }
+    
+    // Mark scroll as in progress
+    isTapScrollInProgress = true;
+    
+    // Calculate scroll distance using configurable percentage
+    const viewportHeight = window.innerHeight;
+    const scrollPercentage = settings.tapScrollPercentage / 100;
+    const scrollDistance = Math.floor(viewportHeight * scrollPercentage);
+    
+    const currentScroll = window.pageYOffset || document.documentElement.scrollTop;
+    const scrollAmount = direction === 'down' ? scrollDistance : -scrollDistance;
+    
+    tapScrollStartPosition = currentScroll;
+    tapScrollTargetPosition = currentScroll + scrollAmount;
+    tapScrollStartTime = 0;
+    
+    // Clamp target to document bounds
+    const maxScroll = document.documentElement.scrollHeight - document.documentElement.clientHeight;
+    tapScrollTargetPosition = Math.max(0, Math.min(tapScrollTargetPosition, maxScroll));
+    
+    // Start animation
+    tapScrollAnimationId = requestAnimationFrame(animateTapScroll);
+  }
+  
   // Page down (scroll down one viewport height)
   function pageDown() {
-    const viewportHeight = window.innerHeight;
-    window.scrollBy({
-      top: viewportHeight,
-      behavior: 'smooth'
-    });
+    startTapScroll('down');
   }
   
   // Page up (scroll up one viewport height)
   function pageUp() {
-    const viewportHeight = window.innerHeight;
-    window.scrollBy({
-      top: -viewportHeight,
-      behavior: 'smooth'
-    });
+    startTapScroll('up');
   }
   
   // ============================================================================
@@ -787,6 +931,13 @@
       direction = deltaY > 0 ? 'down' : 'up';
     } else {
       direction = deltaX > 0 ? 'right' : 'left';
+    }
+    
+    // Check if auto-navigate countdown is active - cancel on any swipe
+    if (autoNavigateCountdownInterval) {
+      cancelAutoNavigateCountdown();
+      showToast('Auto-navigate cancelled', 2000);
+      return;
     }
     
     // If continuous gesture tracking was active, most logic already handled
@@ -881,6 +1032,189 @@
   }
   
   // ============================================================================
+  // WAKE LOCK (SCREEN KEEP AWAKE)
+  // ============================================================================
+  
+  // Enable wake lock to prevent screen from sleeping during autoscroll
+  async function enableWakeLock() {
+    try {
+      // Check if Wake Lock API is available
+      if ('wakeLock' in navigator) {
+        wakeLock = await navigator.wakeLock.request('screen');
+        console.log('Wake Lock acquired');
+        
+        // Re-acquire lock if it gets released (e.g., tab visibility change)
+        wakeLock.addEventListener('release', () => {
+          console.log('Wake Lock released');
+        });
+      } else {
+        console.log('Wake Lock API not supported');
+      }
+    } catch (err) {
+      console.error(`Wake Lock error: ${err.name}, ${err.message}`);
+    }
+  }
+  
+  // Disable wake lock
+  async function disableWakeLock() {
+    if (wakeLock !== null) {
+      try {
+        await wakeLock.release();
+        wakeLock = null;
+        console.log('Wake Lock manually released');
+      } catch (err) {
+        console.error('Failed to release wake lock:', err);
+      }
+    }
+  }
+  
+  // ============================================================================
+  // AUTO-NAVIGATE FEATURE
+  // ============================================================================
+  
+  // Auto-navigate state
+  let autoNavigateCountdownTimer = null;
+  let autoNavigateCountdownInterval = null;
+  let autoNavigateRemainingSeconds = 0;
+  let autoNavigateCancelled = false;
+  
+  // Handle reaching bottom of page
+  function handleReachedBottom() {
+    // Check if auto-navigate is enabled
+    if (!settings.autoNavigateEnabled) {
+      showToast('Reached end of page', 2000);
+      return;
+    }
+    
+    // Get current hostname
+    const hostname = window.location.hostname;
+    
+    // Check if there's a configured selector for this site
+    const siteConfig = settings.navigationSelectors && settings.navigationSelectors[hostname];
+    
+    if (!siteConfig || !siteConfig.enabled) {
+      showToast('Reached end of page', 2000);
+      return;
+    }
+    
+    // Start countdown to auto-navigate
+    startAutoNavigateCountdown(siteConfig);
+  }
+  
+  // Start countdown before clicking next button
+  function startAutoNavigateCountdown(siteConfig) {
+    // Cancel any existing countdown
+    cancelAutoNavigateCountdown();
+    
+    // Get delay from site config or global setting
+    const delay = siteConfig.delay || settings.autoNavigateDelay;
+    autoNavigateRemainingSeconds = delay;
+    autoNavigateCancelled = false;
+    
+    // Show initial countdown toast
+    showAutoNavigateCountdown(autoNavigateRemainingSeconds);
+    
+    // Update countdown every second
+    autoNavigateCountdownInterval = setInterval(() => {
+      autoNavigateRemainingSeconds--;
+      
+      if (autoNavigateRemainingSeconds <= 0) {
+        // Time's up - navigate to next page
+        clearInterval(autoNavigateCountdownInterval);
+        autoNavigateCountdownInterval = null;
+        navigateToNextPage(siteConfig);
+      } else {
+        // Update countdown display
+        showAutoNavigateCountdown(autoNavigateRemainingSeconds);
+      }
+    }, 1000);
+  }
+  
+  // Show auto-navigate countdown toast
+  function showAutoNavigateCountdown(seconds) {
+    // Show message toast at bottom center (clickable to cancel)
+    const message = `Navigating to next page... (Tap to cancel)`;
+    showToast(message, 1100); // Show for slightly longer than 1 second
+    
+    // Add cancel handler to toast
+    if (toastElement) {
+      toastElement.style.cursor = 'pointer';
+      toastElement.style.pointerEvents = 'auto';
+      toastElement.onclick = () => {
+        cancelAutoNavigateCountdown();
+        showToast('Auto-navigate cancelled', 2000);
+      };
+    }
+    
+    // Show countdown number at bottom right
+    showCountdownNotification(seconds);
+  }
+  
+  // Cancel auto-navigate countdown
+  function cancelAutoNavigateCountdown() {
+    if (autoNavigateCountdownInterval) {
+      clearInterval(autoNavigateCountdownInterval);
+      autoNavigateCountdownInterval = null;
+    }
+    if (autoNavigateCountdownTimer) {
+      clearTimeout(autoNavigateCountdownTimer);
+      autoNavigateCountdownTimer = null;
+    }
+    autoNavigateCancelled = true;
+    
+    // Hide countdown notification
+    hideCountdownNotification();
+    
+    // Reset toast click handler
+    if (toastElement) {
+      toastElement.style.cursor = 'default';
+      toastElement.style.pointerEvents = 'none';
+      toastElement.onclick = null;
+    }
+  }
+  
+  // Navigate to next page
+  function navigateToNextPage(siteConfig) {
+    try {
+      // Hide countdown notification
+      hideCountdownNotification();
+      
+      // Find the next button using the configured selector
+      const nextButton = document.querySelector(siteConfig.selector);
+      
+      if (!nextButton) {
+        showToast('Next button not found', 2000);
+        return;
+      }
+      
+      // Check if it's visible
+      if (nextButton.offsetParent === null) {
+        showToast('Next button not visible', 2000);
+        return;
+      }
+      
+      showToast('Navigating to next page...', 1000);
+      
+      // Click the next button
+      nextButton.click();
+      
+      // If auto-start is enabled, start autoscroll after page loads
+      if (siteConfig.autoStart || settings.autoNavigateAutoStart) {
+        // Wait for page to load, then start autoscroll
+        setTimeout(() => {
+          if (autoscroller && !autoscroller.isActive()) {
+            autoscroller.start();
+            showToast('Auto-scrolling...', 2000);
+          }
+        }, 1000);
+      }
+    } catch (error) {
+      console.error('Failed to navigate to next page:', error);
+      showToast('Failed to navigate', 2000);
+    }
+  }
+  
+  // ============================================================================
   // AUTOSCROLLER CLASS
   // ============================================================================
   
@@ -895,6 +1229,8 @@
       this.accumulatedScroll = 0;
       this.targetScrollPosition = 0; // For smooth scrolling approach
       this.usesSmoothScroll = false; // Flag to track which method we're using
+      this.previousScrollTop = 0; // Track previous scroll position to detect if we're stuck
+      this.stuckCounter = 0; // Count how many frames we haven't moved
     }
     
     // Update config (for when settings change)
@@ -923,6 +1259,8 @@
         this.state = 'SCROLLING';
         this.currentSpeed = this.config.defaultSpeed;
         this.startScrolling();
+        // Acquire wake lock to keep screen active
+        enableWakeLock();
       }
     }
     
@@ -930,6 +1268,8 @@
     stop() {
       this.state = 'INACTIVE';
       this.stopScrolling();
+      // Release wake lock
+      disableWakeLock();
     }
     
     // Pause autoscrolling
@@ -937,6 +1277,7 @@
       if (this.state === 'SCROLLING') {
         this.state = 'PAUSED';
         this.stopScrolling();
+        // Keep wake lock active during pause so screen doesn't turn off
       }
     }
     
@@ -989,6 +1330,8 @@
     startScrolling() {
       this.lastScrollTime = performance.now();
       this.accumulatedScroll = 0;
+      this.previousScrollTop = window.pageYOffset || window.scrollY || document.documentElement.scrollTop || 0;
+      this.stuckCounter = 0;
       
       // For low speeds, use smooth scroll with continuously updated target
       this.usesSmoothScroll = this.currentSpeed < 60;
@@ -1011,10 +1354,35 @@
     
     // Scroll one frame (called by requestAnimationFrame)
     scroll(timestamp) {
-      // Check if we've reached the bottom of the page
+      // Check if state is INACTIVE (might have been stopped externally)
+      if (this.state === 'INACTIVE') {
+        return;
+      }
+      
+      // Get current scroll position to check if we're making progress
+      const currentScrollTop = window.pageYOffset || window.scrollY || document.documentElement.scrollTop || 0;
+      
+      // Check if scroll position hasn't changed for multiple frames (we're stuck at bottom)
+      if (Math.abs(currentScrollTop - this.previousScrollTop) < 0.5) {
+        this.stuckCounter++;
+        // If stuck for 10 consecutive frames, we're at the bottom
+        if (this.stuckCounter >= 10) {
+          this.stop();
+          handleReachedBottom();
+          return;
+        }
+      } else {
+        // We're moving, reset the stuck counter
+        this.stuckCounter = 0;
+      }
+      
+      // Update previous scroll position for next frame
+      this.previousScrollTop = currentScrollTop;
+      
+      // Also check if we've reached the bottom using the calculation (backup check)
       if (this.isAtBottom()) {
         this.stop();
-        showToast('Reached bottom');
+        handleReachedBottom();
         return;
       }
       
@@ -1031,10 +1399,19 @@
         // This leverages browser's sub-pixel interpolation for smoother motion
         this.targetScrollPosition += pixelsThisFrame;
         
+        // Clamp target position to document bounds to prevent overscroll
+        // Use same calculation as isAtBottom() for consistency
+        const scrollHeight = document.documentElement.scrollHeight;
+        const clientHeight = document.documentElement.clientHeight;
+        const maxScrollTop = scrollHeight - clientHeight;
+        
+        // Clamp to maximum scroll position
+        this.targetScrollPosition = Math.min(this.targetScrollPosition, maxScrollTop);
+        
         window.scrollTo({
           top: this.targetScrollPosition,
           left: 0,
-          behavior: 'smooth'
+          behavior: 'auto'  // Use instant scroll - we're animating manually via RAF
         });
       } else {
         // For higher speeds: use the accumulation method
@@ -1058,11 +1435,26 @@
     
     // Check if we're at the bottom of the page
     isAtBottom() {
-      const scrollTop = window.pageYOffset || document.documentElement.scrollTop;
+      // Get scroll position - try multiple methods for cross-browser compatibility
+      const scrollTop = window.pageYOffset || window.scrollY || document.documentElement.scrollTop || document.body.scrollTop || 0;
+      
+      // Get document height - use document.documentElement for consistency
       const scrollHeight = document.documentElement.scrollHeight;
+      
+      // Get viewport height - use document.documentElement.clientHeight for consistency
+      // (window.innerHeight includes address bar on mobile which causes issues)
       const clientHeight = document.documentElement.clientHeight;
       
-      return scrollTop + clientHeight >= scrollHeight - 10; // 10px threshold
+      // Use a threshold for "close enough to bottom"
+      const threshold = 10;
+      
+      // Calculate how far we are from the bottom
+      const distanceFromBottom = scrollHeight - (scrollTop + clientHeight);
+      
+      // Check if we're at bottom using the original formula
+      const isAtBottom = distanceFromBottom <= threshold;
+      
+      return isAtBottom;
     }
   }
   
@@ -1086,10 +1478,10 @@
     toastElement.textContent = message;
     toastElement.style.cssText = `
       position: fixed;
-      top: 20px;
+      bottom: 20px;
       left: 50%;
       transform: translateX(-50%);
-      background: rgba(0, 0, 0, 0.85);
+      background: rgba(50, 50, 50, 0.95);
       color: white;
       padding: 12px 24px;
       border-radius: 8px;
@@ -1155,6 +1547,357 @@
   // MESSAGE HANDLING
   // ============================================================================
   
+  // Store last right-clicked element
+  let lastRightClickedElement = null;
+  
+  // Listen for context menu to capture element
+  document.addEventListener('contextmenu', (event) => {
+    lastRightClickedElement = event.target;
+  }, true);
+  
+  // ============================================================================
+  // ELEMENT PICKER MODE (for mobile)
+  // ============================================================================
+  
+  let elementPickerActive = false;
+  let pickerOverlay = null;
+  let pickerHighlight = null;
+  let pickerTarget = null;
+  
+  // Activate element picker mode
+  function activateElementPicker() {
+    console.log('activateElementPicker called, current state:', elementPickerActive);
+    
+    if (elementPickerActive) {
+      console.log('Picker already active, ignoring');
+      return;
+    }
+    
+    elementPickerActive = true;
+    console.log('Setting elementPickerActive to true');
+    
+    // Hide any existing toasts
+    if (toastElement) {
+      toastElement.style.display = 'none';
+    }
+    
+    console.log('Creating picker UI elements');
+    
+    // Create highlight box first (under overlay)
+    pickerHighlight = document.createElement('div');
+    pickerHighlight.id = 'gesture-autoscroller-picker-highlight';
+    pickerHighlight.style.cssText = `
+      position: absolute;
+      border: 3px solid #667eea;
+      background: rgba(102, 126, 234, 0.2);
+      pointer-events: none;
+      z-index: 2147483645;
+      transition: all 0.1s ease;
+      box-shadow: 0 0 0 3000px rgba(0, 0, 0, 0.5);
+    `;
+    
+    // Create instructions banner
+    const banner = document.createElement('div');
+    banner.id = 'gesture-autoscroller-picker-banner';
+    banner.style.cssText = `
+      position: fixed;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      background: rgba(50, 50, 50, 0.95);
+      color: white;
+      padding: 12px 20px;
+      border-radius: 8px;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      font-size: 14px;
+      font-weight: 600;
+      z-index: 2147483647;
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+      max-width: 70%;
+      text-align: center;
+      pointer-events: none;
+    `;
+    banner.textContent = 'Tap on the "Next Page" button';
+    
+    // Create cancel button
+    const cancelBtn = document.createElement('button');
+    cancelBtn.id = 'gesture-autoscroller-picker-cancel';
+    cancelBtn.textContent = 'Cancel';
+    cancelBtn.style.cssText = `
+      position: fixed;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, calc(-50% + 60px));
+      background: rgba(50, 50, 50, 0.95);
+      color: white;
+      padding: 10px 24px;
+      border: none;
+      border-radius: 8px;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      z-index: 2147483647;
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+      pointer-events: auto;
+      touch-action: manipulation;
+    `;
+    
+    // Append elements
+    document.body.appendChild(pickerHighlight);
+    document.body.appendChild(banner);
+    document.body.appendChild(cancelBtn);
+    
+    // Add event listeners
+    document.addEventListener('mousemove', handlePickerMouseMove, true);
+    document.addEventListener('touchstart', handlePickerTouchStart, true);
+    document.addEventListener('touchmove', handlePickerTouchMove, true);
+    document.addEventListener('click', handlePickerClick, true);
+    document.addEventListener('touchend', handlePickerTouchEnd, true);
+    
+    // Cancel button handler
+    cancelBtn.addEventListener('touchend', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      deactivateElementPicker();
+    }, true);
+    
+    cancelBtn.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      deactivateElementPicker();
+    }, true);
+    
+    // Store references for cleanup
+    pickerHighlight._banner = banner;
+    pickerHighlight._cancelBtn = cancelBtn;
+  }
+  
+  // Deactivate element picker mode
+  function deactivateElementPicker() {
+    if (!elementPickerActive) return;
+    
+    elementPickerActive = false;
+    
+    // Remove event listeners
+    document.removeEventListener('mousemove', handlePickerMouseMove, true);
+    document.removeEventListener('touchstart', handlePickerTouchStart, true);
+    document.removeEventListener('touchmove', handlePickerTouchMove, true);
+    document.removeEventListener('click', handlePickerClick, true);
+    document.removeEventListener('touchend', handlePickerTouchEnd, true);
+    
+    // Remove elements
+    if (pickerHighlight) {
+      if (pickerHighlight._banner) pickerHighlight._banner.remove();
+      if (pickerHighlight._cancelBtn) pickerHighlight._cancelBtn.remove();
+      pickerHighlight.remove();
+      pickerHighlight = null;
+    }
+    
+    // Restore toasts
+    if (toastElement) {
+      toastElement.style.display = '';
+    }
+    
+    pickerTarget = null;
+  }
+  
+  // Handle mouse move in picker mode
+  function handlePickerMouseMove(event) {
+    const element = document.elementFromPoint(event.clientX, event.clientY);
+    updatePickerHighlight(element);
+  }
+  
+  // Handle touch start in picker mode
+  function handlePickerTouchStart(event) {
+    // Check if it's the cancel button
+    if (event.target && event.target.id === 'gesture-autoscroller-picker-cancel') {
+      return; // Let the cancel button handle its own event
+    }
+    
+    if (event.touches.length > 0) {
+      const touch = event.touches[0];
+      const element = document.elementFromPoint(touch.clientX, touch.clientY);
+      updatePickerHighlight(element);
+    }
+  }
+  
+  // Handle touch move in picker mode
+  function handlePickerTouchMove(event) {
+    // Check if it's the cancel button
+    if (event.target && event.target.id === 'gesture-autoscroller-picker-cancel') {
+      return; // Let the cancel button handle its own event
+    }
+    
+    event.preventDefault();
+    
+    if (event.touches.length > 0) {
+      const touch = event.touches[0];
+      const element = document.elementFromPoint(touch.clientX, touch.clientY);
+      updatePickerHighlight(element);
+    }
+  }
+  
+  // Update picker highlight
+  function updatePickerHighlight(element) {
+    if (!element || element === pickerHighlight) return;
+    
+    // Don't highlight our own UI elements
+    if (element.id && element.id.startsWith('gesture-autoscroller-picker')) {
+      return;
+    }
+    
+    // Check if it's one of our picker UI elements
+    if (pickerHighlight && (
+      element === pickerHighlight._banner ||
+      element === pickerHighlight._cancelBtn
+    )) return;
+    
+    pickerTarget = element;
+    
+    const rect = element.getBoundingClientRect();
+    pickerHighlight.style.top = (rect.top + window.scrollY) + 'px';
+    pickerHighlight.style.left = (rect.left + window.scrollX) + 'px';
+    pickerHighlight.style.width = rect.width + 'px';
+    pickerHighlight.style.height = rect.height + 'px';
+  }
+  
+  // Handle click in picker mode
+  function handlePickerClick(event) {
+    // Check if it's the cancel button
+    if (event.target && event.target.id === 'gesture-autoscroller-picker-cancel') {
+      return; // Let the cancel button handle its own event
+    }
+    
+    event.preventDefault();
+    event.stopPropagation();
+    
+    if (!pickerTarget) return;
+    
+    // Don't pick our own UI elements
+    if (pickerTarget.id && pickerTarget.id.startsWith('gesture-autoscroller-picker')) {
+      return;
+    }
+    
+    // Get selector for the target element
+    const selector = generateSelector(pickerTarget);
+    const elementInfo = {
+      selector: selector,
+      hostname: window.location.hostname,
+      tagName: pickerTarget.tagName.toLowerCase(),
+      text: pickerTarget.textContent ? pickerTarget.textContent.trim().substring(0, 50) : '',
+      href: pickerTarget.href || ''
+    };
+    
+    console.log('Element picked:', elementInfo);
+    
+    // Deactivate picker
+    deactivateElementPicker();
+    
+    // Send to background script (which will forward to options page)
+    browser.runtime.sendMessage({
+      action: 'elementPicked',
+      elementInfo: elementInfo
+    }).then(response => {
+      console.log('Element picked message sent, response:', response);
+    }).catch(error => {
+      console.error('Failed to send element picked message:', error);
+    });
+  }
+  
+  // Handle touch end in picker mode
+  function handlePickerTouchEnd(event) {
+    // Check if it's the cancel button
+    if (event.target && event.target.id === 'gesture-autoscroller-picker-cancel') {
+      return; // Let the cancel button handle its own event
+    }
+    
+    event.preventDefault();
+    event.stopPropagation();
+    
+    // Get the touch point
+    if (event.changedTouches && event.changedTouches.length > 0) {
+      const touch = event.changedTouches[0];
+      const element = document.elementFromPoint(touch.clientX, touch.clientY);
+      
+      // Update target one last time
+      if (element && element.id !== 'gesture-autoscroller-picker-cancel') {
+        updatePickerHighlight(element);
+      }
+    }
+    
+    // Small delay to ensure highlight is updated
+    setTimeout(() => {
+      handlePickerClick(event);
+    }, 50);
+  }
+  
+  // Generate unique CSS selector for an element
+  function generateSelector(element) {
+    if (!element) return null;
+    
+    // Try ID first (most specific)
+    if (element.id) {
+      return `#${CSS.escape(element.id)}`;
+    }
+    
+    // Try unique class combination
+    if (element.className && typeof element.className === 'string') {
+      const classes = element.className.trim().split(/\s+/).filter(c => c);
+      if (classes.length > 0) {
+        const classSelector = classes.map(c => `.${CSS.escape(c)}`).join('');
+        const matchingElements = document.querySelectorAll(classSelector);
+        if (matchingElements.length === 1) {
+          return classSelector;
+        }
+      }
+    }
+    
+    // Try element type + attributes
+    const tagName = element.tagName.toLowerCase();
+    
+    // For links, try href attribute
+    if (tagName === 'a' && element.hasAttribute('href')) {
+      const href = element.getAttribute('href');
+      const linkSelector = `a[href="${CSS.escape(href)}"]`;
+      const matchingLinks = document.querySelectorAll(linkSelector);
+      if (matchingLinks.length === 1) {
+        return linkSelector;
+      }
+    }
+    
+    // Try rel attribute (common for next/prev buttons)
+    if (element.hasAttribute('rel')) {
+      const rel = element.getAttribute('rel');
+      const relSelector = `${tagName}[rel="${CSS.escape(rel)}"]`;
+      const matchingElements = document.querySelectorAll(relSelector);
+      if (matchingElements.length === 1) {
+        return relSelector;
+      }
+    }
+    
+    // Try data attributes
+    for (const attr of element.attributes) {
+      if (attr.name.startsWith('data-')) {
+        const attrSelector = `${tagName}[${attr.name}="${CSS.escape(attr.value)}"]`;
+        const matchingElements = document.querySelectorAll(attrSelector);
+        if (matchingElements.length === 1) {
+          return attrSelector;
+        }
+      }
+    }
+    
+    // Fall back to nth-child selector
+    const parent = element.parentElement;
+    if (parent) {
+      const siblings = Array.from(parent.children);
+      const index = siblings.indexOf(element) + 1;
+      return `${generateSelector(parent)} > ${tagName}:nth-child(${index})`;
+    }
+    
+    return tagName;
+  }
+  
   // Listen for messages from options page (settings updates)
   browser.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (message.action === 'settingsUpdated') {
@@ -1176,6 +1919,58 @@
           }
         }
       });
+    } else if (message.action === 'captureElementSelector') {
+      // Capture the CSS selector of the last right-clicked element
+      if (lastRightClickedElement) {
+        const selector = generateSelector(lastRightClickedElement);
+        const elementInfo = {
+          selector: selector,
+          hostname: window.location.hostname,
+          tagName: lastRightClickedElement.tagName.toLowerCase(),
+          text: lastRightClickedElement.textContent ? lastRightClickedElement.textContent.trim().substring(0, 50) : '',
+          href: lastRightClickedElement.href || ''
+        };
+        
+        sendResponse({ success: true, ...elementInfo });
+      } else {
+        sendResponse({ success: false, error: 'No element was captured' });
+      }
+      return true; // Keep the message channel open for async response
+    } else if (message.action === 'testSelector') {
+      // Test if a selector matches any elements on the current page
+      try {
+        const elements = document.querySelectorAll(message.selector);
+        const matches = Array.from(elements).map(el => ({
+          tagName: el.tagName.toLowerCase(),
+          text: el.textContent ? el.textContent.trim().substring(0, 50) : '',
+          href: el.href || '',
+          visible: el.offsetParent !== null
+        }));
+        
+        sendResponse({ 
+          success: true, 
+          count: elements.length,
+          matches: matches
+        });
+      } catch (error) {
+        sendResponse({ 
+          success: false, 
+          error: `Invalid selector: ${error.message}` 
+        });
+      }
+      return true;
+    } else if (message.action === 'activateElementPicker') {
+      // Activate element picker mode
+      console.log('Received activateElementPicker message');
+      try {
+        activateElementPicker();
+        console.log('Element picker activated');
+        sendResponse({ success: true });
+      } catch (error) {
+        console.error('Failed to activate element picker:', error);
+        sendResponse({ success: false, error: error.message });
+      }
+      return true;
     }
   });
   

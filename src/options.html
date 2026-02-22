@@ -127,6 +127,51 @@
       min-width: 50px;
       text-align: center;
     }
+    
+    .slider-input-group {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 8px;
+    }
+    
+    .slider-input-group input[type="range"] {
+      flex: 1;
+      min-width: 0;
+    }
+    
+    .input-with-unit {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      background: #f9f9f9;
+      padding: 6px 10px;
+      border-radius: 6px;
+      border: 1px solid #e0e0e0;
+      min-width: 100px;
+    }
+    
+    .value-input {
+      width: 70px;
+      padding: 4px 6px;
+      border: 1px solid #ccc;
+      border-radius: 4px;
+      font-size: 13px;
+      text-align: right;
+      font-family: monospace;
+    }
+    
+    .value-input:focus {
+      outline: none;
+      border-color: #667eea;
+    }
+    
+    .unit {
+      color: #666;
+      font-size: 12px;
+      white-space: nowrap;
+      font-weight: 500;
+    }
 
     input[type="range"] {
       width: 100%;
@@ -519,6 +564,553 @@
       display: block;
       margin-bottom: 4px;
     }
+    
+    /* Radio Group Styles */
+    .radio-group {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      margin-top: 12px;
+    }
+    
+    .radio-option {
+      display: flex;
+      padding: 12px 16px;
+      border: 2px solid #e0e0e0;
+      border-radius: 8px;
+      cursor: pointer;
+      transition: all 0.2s;
+      align-items: flex-start;
+    }
+    
+    .radio-option:hover {
+      border-color: #667eea;
+      background: #f9f9ff;
+    }
+    
+    .radio-option input[type="radio"] {
+      margin-top: 4px;
+      margin-right: 12px;
+      cursor: pointer;
+      accent-color: #667eea;
+      flex-shrink: 0;
+    }
+    
+    .radio-option input[type="radio"]:checked {
+      accent-color: #667eea;
+    }
+    
+    .radio-option:has(input[type="radio"]:checked) {
+      border-color: #667eea;
+      background: #f0f3ff;
+    }
+    
+    .radio-label-text {
+      flex: 1;
+    }
+    
+    .radio-label-text strong {
+      display: block;
+      font-size: 15px;
+      margin-bottom: 4px;
+      color: #333;
+    }
+    
+    .radio-description {
+      display: block;
+      font-size: 13px;
+      color: #666;
+    }
+    
+    .label-text {
+      display: block;
+      font-size: 14px;
+      font-weight: 500;
+      margin-bottom: 4px;
+    }
+    
+    .label-description {
+      display: block;
+      font-size: 13px;
+      color: #666;
+      margin-bottom: 8px;
+    }
+    
+    /* Collapsible Section Styles */
+    .collapsible-section {
+      margin-bottom: 24px;
+    }
+    
+    .collapsible-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 14px 18px;
+      background: #667eea;
+      color: white;
+      border-radius: 6px;
+      cursor: pointer;
+      transition: background 0.2s ease;
+      user-select: none;
+      margin-bottom: 0;
+    }
+    
+    .collapsible-header:hover {
+      background: #5568d3;
+    }
+    
+    .collapsible-header-content {
+      display: flex;
+      align-items: center;
+    }
+    
+    .collapsible-title {
+      font-size: 16px;
+      font-weight: 600;
+      margin: 0;
+    }
+    
+    .collapsible-arrow {
+      font-size: 20px;
+      transition: transform 0.3s ease;
+    }
+    
+    .collapsible-section.collapsed .collapsible-arrow {
+      transform: rotate(-90deg);
+    }
+    
+    .collapsible-content {
+      overflow: hidden;
+      transition: max-height 0.4s ease, opacity 0.3s ease, padding 0.3s ease;
+      opacity: 1;
+      padding-top: 16px;
+      max-height: 3000px;
+    }
+    
+    .collapsible-section.collapsed .collapsible-content {
+      max-height: 0;
+      opacity: 0;
+      padding-top: 0;
+      padding-bottom: 0;
+    }
+    
+    .collapsible-section.collapsed .section {
+      margin-bottom: 0;
+    }
+    
+    /* Zone Split Preview Styles */
+    .zone-split-preview {
+      margin: 16px 0;
+      border: 2px solid #ccc;
+      border-radius: 6px;
+      overflow: hidden;
+      height: 200px;
+    }
+    
+    .zone-split-container {
+      display: flex;
+      height: 100%;
+      font-weight: 600;
+      font-size: 14px;
+      text-align: center;
+    }
+    
+    .zone-split-container.horizontal {
+      flex-direction: row;
+    }
+    
+    .zone-split-container.vertical {
+      flex-direction: column;
+    }
+    
+    .zone-split-container .zone {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      transition: all 0.3s ease;
+    }
+    
+    /* Enhanced gradient colors for zone preview */
+    .zone-split-container .up-zone {
+      background: linear-gradient(135deg, #ffcdd2 0%, #ef9a9a 100%);
+      color: #c62828;
+      border-right: 2px solid #e57373;
+    }
+    
+    .zone-split-container .down-zone {
+      background: linear-gradient(135deg, #c8e6c9 0%, #a5d6a7 100%);
+      color: #2e7d32;
+    }
+    
+    .zone-split-container.vertical .up-zone {
+      border-right: none;
+      border-bottom: 2px solid #81c784;
+    }
+    
+    /* Auto-Navigate Styles */
+    .subsection {
+      margin-top: 24px;
+      padding: 16px;
+      background: #f9f9f9;
+      border-radius: 6px;
+    }
+    
+    .subsection-title {
+      font-size: 16px;
+      font-weight: 600;
+      margin-bottom: 16px;
+      color: #555;
+    }
+    
+    .add-nav-config {
+      padding: 16px;
+      background: white;
+      border-radius: 6px;
+      margin-bottom: 16px;
+      border: 1px solid #e0e0e0;
+    }
+    
+    .form-row {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 8px;
+    }
+    
+    .form-input {
+      padding: 8px 12px;
+      border: 1px solid #ccc;
+      border-radius: 4px;
+      font-family: monospace;
+      font-size: 13px;
+    }
+    
+    .form-hint {
+      font-size: 13px;
+      color: #666;
+      margin-top: 8px;
+    }
+    
+    .selector-tester {
+      margin-top: 16px;
+      padding-top: 16px;
+      border-top: 1px solid #e0e0e0;
+    }
+    
+    .test-result {
+      margin-top: 8px;
+      padding: 12px;
+      border-radius: 4px;
+      font-size: 13px;
+      display: none;
+    }
+    
+    .test-result.visible {
+      display: block;
+    }
+    
+    .test-result.success {
+      background: #e8f5e9;
+      border: 1px solid #a5d6a7;
+      color: #2e7d32;
+    }
+    
+    .test-result.error {
+      background: #ffebee;
+      border: 1px solid #ef9a9a;
+      color: #c62828;
+    }
+    
+    .nav-configs-list {
+      margin-top: 16px;
+    }
+    
+    .nav-config-item {
+      padding: 16px;
+      background: white;
+      border-radius: 6px;
+      margin-bottom: 12px;
+      border: 1px solid #e0e0e0;
+    }
+    
+    .config-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      margin-bottom: 12px;
+    }
+    
+    .config-hostname {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    
+    .config-hostname strong {
+      font-size: 15px;
+      color: #333;
+    }
+    
+    .config-status {
+      font-size: 12px;
+      padding: 2px 8px;
+      border-radius: 12px;
+      font-weight: 500;
+    }
+    
+    .config-status.enabled {
+      background: #e8f5e9;
+      color: #2e7d32;
+    }
+    
+    .config-status.disabled {
+      background: #f5f5f5;
+      color: #999;
+    }
+    
+    .config-actions {
+      display: flex;
+      gap: 8px;
+    }
+    
+    .btn-icon {
+      background: none;
+      border: none;
+      font-size: 18px;
+      cursor: pointer;
+      padding: 4px 8px;
+      border-radius: 4px;
+      transition: background 0.2s;
+    }
+    
+    .btn-icon:hover {
+      background: #f0f0f0;
+    }
+    
+    .config-details {
+      font-size: 13px;
+    }
+    
+    .config-row {
+      display: flex;
+      margin-bottom: 6px;
+    }
+    
+    .config-label {
+      font-weight: 500;
+      color: #666;
+      min-width: 100px;
+    }
+    
+    .config-value {
+      color: #333;
+    }
+    
+    .config-value code {
+      background: #f5f5f5;
+      padding: 2px 6px;
+      border-radius: 3px;
+      font-family: monospace;
+      font-size: 12px;
+    }
+    
+    .config-edit-form {
+      margin-top: 16px;
+      padding-top: 16px;
+      border-top: 1px solid #e0e0e0;
+    }
+    
+    .form-group {
+      margin-bottom: 12px;
+    }
+    
+    .form-group label {
+      display: block;
+      font-size: 13px;
+      font-weight: 500;
+      margin-bottom: 6px;
+      color: #555;
+    }
+    
+    .form-group input[type="text"],
+    .form-group input[type="number"] {
+      width: 100%;
+      padding: 8px 12px;
+      border: 1px solid #ccc;
+      border-radius: 4px;
+      font-family: monospace;
+      font-size: 13px;
+    }
+    
+    .form-group input[type="checkbox"] {
+      margin-right: 8px;
+    }
+    
+    .form-actions {
+      display: flex;
+      gap: 8px;
+      margin-top: 16px;
+    }
+    
+    .label-text-block {
+      display: flex;
+      flex-direction: column;
+    }
+    
+    .nav-configs-empty {
+      padding: 24px;
+      text-align: center;
+      color: #999;
+      font-size: 14px;
+      background: white;
+      border-radius: 6px;
+      border: 1px dashed #ccc;
+    }
+    
+    .element-picker-section {
+      padding: 16px;
+      background: white;
+      border-radius: 6px;
+      margin-bottom: 16px;
+      border: 2px solid #667eea;
+    }
+    
+    .add-nav-config {
+      overflow-x: auto;
+    }
+    
+    .form-row input {
+      min-width: 0;
+      max-width: 100%;
+    }
+    
+    /* Mobile Responsive Styles */
+    @media (max-width: 600px) {
+      body {
+        padding: 0;
+      }
+      
+      .container {
+        border-radius: 0;
+      }
+      
+      header {
+        padding: 16px;
+      }
+      
+      header h1 {
+        font-size: 20px;
+      }
+      
+      .content {
+        padding: 16px;
+      }
+      
+      .section {
+        margin-bottom: 24px;
+      }
+      
+      .section-title {
+        font-size: 16px;
+      }
+      
+      /* Fix whitelist add button layout on mobile */
+      .whitelist-add {
+        flex-direction: column;
+        gap: 12px;
+      }
+      
+      .whitelist-add input {
+        width: 100%;
+      }
+      
+      .whitelist-add button {
+        width: 100%;
+        padding: 12px;
+      }
+      
+      /* Fix slider-input group layout on mobile */
+      .slider-input-group {
+        flex-direction: column;
+        gap: 8px;
+        align-items: stretch;
+      }
+      
+      .input-with-unit {
+        justify-content: center;
+      }
+      
+      /* Improve button sizing on mobile */
+      .btn-add-current {
+        width: 100%;
+        padding: 12px;
+      }
+      
+      /* Better spacing for checkboxes */
+      .checkbox-group {
+        padding: 16px 12px;
+      }
+      
+      /* Tabs */
+      .tabs {
+        padding: 0;
+      }
+      
+      .tab {
+        font-size: 13px;
+        padding: 12px 8px;
+      }
+      
+      /* Auto-Navigate section mobile fixes */
+      .form-row {
+        flex-direction: column;
+        gap: 12px;
+      }
+      
+      .form-input {
+        width: 100%;
+        box-sizing: border-box;
+      }
+      
+      .add-nav-config {
+        padding: 12px;
+      }
+      
+      .subsection {
+        padding: 12px;
+      }
+      
+      .nav-config-item {
+        padding: 12px;
+      }
+      
+      .config-header {
+        flex-direction: column;
+        gap: 12px;
+      }
+      
+      .config-actions {
+        width: 100%;
+        justify-content: flex-end;
+      }
+      
+      .config-value code {
+        word-break: break-all;
+        font-size: 11px;
+      }
+      
+      .form-actions {
+        flex-direction: column;
+      }
+      
+      .form-actions button {
+        width: 100%;
+      }
+      
+      .element-picker-section {
+        padding: 12px;
+      }
+    }
   
   </style>
 </head>
@@ -538,7 +1130,7 @@
     <!-- Settings Tab -->
     <div class="tab-content active" id="settingsTab">
       <div class="content">
-      <!-- Feature Toggles -->
+      <!-- Feature Toggles (Always Visible) -->
       <section class="section">
         <h2 class="section-title">Feature Toggles</h2>
         <div class="setting-group">
@@ -557,6 +1149,139 @@
         </div>
       </section>
 
+      <!-- Collapsible Section 1: Tap Navigation Settings -->
+      <div class="collapsible-section" id="tapSection">
+        <div class="collapsible-header">
+          <div class="collapsible-header-content">
+            <h2 class="collapsible-title">Tap Navigation Settings</h2>
+          </div>
+          <span class="collapsible-arrow">▼</span>
+        </div>
+        <div class="collapsible-content">
+
+      <section class="section">
+        
+        <div class="setting-group">
+          <label>
+            <span class="label-text">Tap Zone Layout</span>
+            <span class="label-description">
+              Choose how tap zones are divided for scroll up/down
+            </span>
+          </label>
+          
+          <div class="radio-group">
+            <label class="radio-option">
+              <input 
+                type="radio" 
+                name="tapZoneLayout" 
+                value="horizontal"
+                id="tapZoneLayoutHorizontal"
+                checked
+              >
+              <div class="radio-label-text">
+                <strong>Horizontal Split</strong>
+                <span class="radio-description">Tap left = up, tap right = down</span>
+              </div>
+            </label>
+            
+            <label class="radio-option">
+              <input 
+                type="radio" 
+                name="tapZoneLayout" 
+                value="vertical"
+                id="tapZoneLayoutVertical"
+              >
+              <div class="radio-label-text">
+                <strong>Vertical Split</strong>
+                <span class="radio-description">Tap top = up, tap bottom = down</span>
+              </div>
+            </label>
+          </div>
+        </div>
+        
+        <div class="setting-group">
+          <label for="tapZoneUpPercentage">
+            <span class="label-text">Tap Zone Size</span>
+            <span class="label-description">
+              Size of scroll-up zone (remaining space is scroll-down zone)
+            </span>
+          </label>
+          <div class="slider-input-group">
+            <input 
+              type="range" 
+              id="tapZoneUpPercentage" 
+              min="10" 
+              max="90" 
+              step="5"
+              value="50"
+            >
+            <div class="input-with-unit">
+              <input 
+                type="number" 
+                id="tapZoneUpPercentageInput"
+                min="10"
+                max="90"
+                step="5"
+                value="50"
+                class="value-input"
+              >
+              <span class="unit">%</span>
+            </div>
+          </div>
+        </div>
+        
+        <!-- Unified Tap Zone Preview -->
+        <div class="setting-group">
+          <label>
+            <span class="label-text">Tap Zone Preview</span>
+            <span class="label-description">
+              Visual preview of your configured tap zones
+            </span>
+          </label>
+          <div class="zone-split-preview" id="zoneSplitPreview">
+            <!-- Dynamic preview updated via JavaScript -->
+          </div>
+          <div class="slider-hint">
+            <span id="zoneSplitDescription">Scroll-up: 50%, Scroll-down: 50%</span>
+          </div>
+        </div>
+        
+        <div class="setting-group">
+          <div class="slider-group">
+            <div class="slider-label">
+              <span>Tap Scroll Distance</span>
+            </div>
+            <div class="slider-input-group">
+              <input type="range" id="tapScrollPercentage" min="10" max="100" step="5" value="100">
+              <div class="input-with-unit">
+                <input type="number" id="tapScrollPercentageInput" min="10" max="100" step="5" value="100" class="value-input">
+                <span class="unit">%</span>
+              </div>
+            </div>
+            <div class="slider-hint">
+              Percentage of screen height to scroll on tap (10-100%)<br>
+              <strong>100%</strong> = full screen (default), 
+              <strong>50%</strong> = half screen (maintains context), 
+              <strong>75%</strong> = three-quarters screen
+            </div>
+          </div>
+        </div>
+      </section>
+        
+        </div>
+      </div>
+      <!-- End Collapsible Section 1 -->
+      
+      <!-- Collapsible Section 2: Autoscroll Settings -->
+      <div class="collapsible-section" id="autoscrollSection">
+        <div class="collapsible-header">
+          <div class="collapsible-header-content">
+            <h2 class="collapsible-title">Autoscroll Settings</h2>
+          </div>
+          <span class="collapsible-arrow">▼</span>
+        </div>
+        <div class="collapsible-content">
+
       <!-- Auto-Start Settings -->
       <section class="section" id="autoStartSection">
         <h2 class="section-title">Auto-Start Settings</h2>
@@ -567,9 +1292,14 @@
           <div class="slider-group">
             <div class="slider-label">
               <span>Auto-start Delay</span>
-              <span class="slider-value" id="autoStartDelayValue">3 seconds</span>
             </div>
-            <input type="range" id="autoStartDelay" min="1" max="10" step="1" value="3">
+            <div class="slider-input-group">
+              <input type="range" id="autoStartDelay" min="1" max="10" step="1" value="3">
+              <div class="input-with-unit">
+                <input type="number" id="autoStartDelayInput" min="1" max="10" step="1" value="3" class="value-input">
+                <span class="unit">sec</span>
+              </div>
+            </div>
             <div class="slider-hint">Countdown duration before auto-starting (in seconds)</div>
           </div>
         </div>
@@ -582,44 +1312,76 @@
           <div class="slider-group">
             <div class="slider-label">
               <span>Speed</span>
-              <span class="slider-value" id="defaultSpeedValue">20 px/sec</span>
             </div>
-            <input type="range" id="defaultSpeed" min="1" max="3000" step="1" value="20">
+            <div class="slider-input-group">
+              <input type="range" id="defaultSpeed" min="1" max="3000" step="1" value="20">
+              <div class="input-with-unit">
+                <input type="number" id="defaultSpeedInput" min="1" max="3000" step="1" value="20" class="value-input">
+                <span class="unit">px/sec</span>
+              </div>
+            </div>
             <div class="slider-hint">Scrolling speed (pixels per second)</div>
           </div>
 
           <div class="slider-group">
             <div class="slider-label">
               <span>Minimum Speed</span>
-              <span class="slider-value" id="minSpeedValue">1 px/sec</span>
             </div>
-            <input type="range" id="minSpeed" min="1" max="500" step="1" value="1">
+            <div class="slider-input-group">
+              <input type="range" id="minSpeed" min="1" max="500" step="1" value="1">
+              <div class="input-with-unit">
+                <input type="number" id="minSpeedInput" min="1" max="500" step="1" value="1" class="value-input">
+                <span class="unit">px/sec</span>
+              </div>
+            </div>
             <div class="slider-hint">Lower bound for speed adjustment</div>
           </div>
 
           <div class="slider-group">
             <div class="slider-label">
               <span>Maximum Speed</span>
-              <span class="slider-value" id="maxSpeedValue">3000 px/sec</span>
             </div>
-            <input type="range" id="maxSpeed" min="100" max="5000" step="10" value="3000">
+            <div class="slider-input-group">
+              <input type="range" id="maxSpeed" min="100" max="5000" step="10" value="3000">
+              <div class="input-with-unit">
+                <input type="number" id="maxSpeedInput" min="100" max="5000" step="10" value="3000" class="value-input">
+                <span class="unit">px/sec</span>
+              </div>
+            </div>
             <div class="slider-hint">Upper bound for speed adjustment</div>
           </div>
 
           <div class="slider-group">
             <div class="slider-label">
               <span>Granularity</span>
-              <span class="slider-value" id="granularityValue">10 px/sec</span>
             </div>
-            <input type="range" id="granularity" min="1" max="100" step="1" value="10">
+            <div class="slider-input-group">
+              <input type="range" id="granularity" min="1" max="100" step="1" value="10">
+              <div class="input-with-unit">
+                <input type="number" id="granularityInput" min="1" max="100" step="1" value="10" class="value-input">
+                <span class="unit">px/sec</span>
+              </div>
+            </div>
             <div class="slider-hint">Amount each swipe changes the speed</div>
           </div>
         </div>
       </section>
+        
+        </div>
+      </div>
+      <!-- End Collapsible Section 2 -->
 
-      <!-- Host Whitelist -->
+      <!-- Collapsible Section 3: Host Whitelist -->
+      <div class="collapsible-section" id="whitelistSection">
+        <div class="collapsible-header">
+          <div class="collapsible-header-content">
+            <h2 class="collapsible-title">Active Hosts (Whitelist)</h2>
+          </div>
+          <span class="collapsible-arrow">▼</span>
+        </div>
+        <div class="collapsible-content">
+
       <section class="section">
-        <h2 class="section-title">Active Hosts (Whitelist)</h2>
         
         <div class="info-box">
           <strong>Note:</strong> The extension only works on whitelisted sites. Add your favorite reading sites below.
@@ -651,6 +1413,189 @@
           </div>
         </div>
       </section>
+        
+        </div>
+      </div>
+      <!-- End Collapsible Section 3 -->
+
+      <!-- Collapsible Section 4: Auto-Navigate to Next Page -->
+      <div class="collapsible-section" id="autoNavigateSection">
+        <div class="collapsible-header">
+          <div class="collapsible-header-content">
+            <h2 class="collapsible-title">Auto-Navigate to Next Page</h2>
+          </div>
+          <span class="collapsible-arrow">▼</span>
+        </div>
+        <div class="collapsible-content">
+
+      <section class="section">
+        
+        <div class="info-box">
+          <strong>Auto-Navigate Feature:</strong> Automatically click "Next Page" buttons when reaching the bottom during autoscroll, enabling continuous hands-free reading across multiple pages.
+        </div>
+
+        <!-- Global Enable/Disable -->
+        <div class="setting-group">
+          <div class="checkbox-group">
+            <input type="checkbox" id="autoNavigateEnabled" name="autoNavigateEnabled">
+            <label for="autoNavigateEnabled">
+              <div class="label-text-block">
+                <span class="label-text">Enable auto-navigation</span>
+                <span class="label-description">Automatically click "Next" button when autoscroll reaches page bottom</span>
+              </div>
+            </label>
+          </div>
+        </div>
+
+        <!-- Countdown Delay -->
+        <div class="setting-group">
+          <label for="autoNavigateDelay">
+            <span class="label-text">Countdown delay</span>
+            <span class="label-description">Seconds to wait before navigating (allows cancellation)</span>
+          </label>
+          <div class="slider-input-group">
+            <input 
+              type="range" 
+              id="autoNavigateDelay" 
+              name="autoNavigateDelay"
+              min="1" 
+              max="30" 
+              value="3"
+              class="slider"
+            >
+            <div class="input-with-unit">
+              <input 
+                type="number" 
+                id="autoNavigateDelayValue"
+                min="1"
+                max="30"
+                value="3"
+                class="value-input"
+              >
+              <span class="unit">sec</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Auto-start on new page -->
+        <div class="setting-group">
+          <div class="checkbox-group">
+            <input type="checkbox" id="autoNavigateAutoStart" name="autoNavigateAutoStart" checked>
+            <label for="autoNavigateAutoStart">
+              <div class="label-text-block">
+                <span class="label-text">Auto-start scrolling on new page</span>
+                <span class="label-description">Automatically resume autoscroll after navigating to next page</span>
+              </div>
+            </label>
+          </div>
+        </div>
+
+        <!-- Per-site selector configuration -->
+        <div class="subsection">
+          <div class="subsection-title">Per-Site Navigation Configuration</div>
+          
+          <div class="info-box">
+            <strong>How to add a site:</strong>
+            <ol style="margin: 8px 0 0 20px; padding: 0;">
+              <li>Navigate to the site you want to configure</li>
+              <li><strong>Desktop:</strong> Right-click on the "Next Page" button and select "Select as 'Next Page' button"</li>
+              <li><strong>Mobile:</strong> Use the "Pick Element from Page" button below</li>
+              <li>The options page will open with the selector pre-filled</li>
+            </ol>
+          </div>
+
+          <!-- Element Picker Button -->
+          <div class="element-picker-section">
+            <button id="activateElementPicker" class="btn-primary" style="width: 100%; margin-bottom: 16px;">
+              📍 Activate Element Picker
+            </button>
+            <div class="form-hint" style="text-align: center; background: #fff3cd; padding: 12px; border-radius: 6px; border: 1px solid #ffc107; margin-top: 8px;">
+              <strong>Instructions:</strong><br>
+              1. Tap the button above<br>
+              2. Switch to the website tab you want to configure<br>
+              3. Tap on the "Next Page" button<br>
+              4. Switch back to this tab<br>
+              5. The form will be filled in automatically
+            </div>
+          </div>
+
+          <!-- Add new site configuration -->
+          <div class="add-nav-config">
+            <h4 style="margin-bottom: 12px; font-size: 14px; font-weight: 600;">Add/Edit Site Configuration</h4>
+            <div class="form-row">
+              <input 
+                type="text" 
+                id="navSiteHost" 
+                placeholder="example.com" 
+                class="form-input"
+                style="flex: 1;"
+              >
+              <input 
+                type="text" 
+                id="navSiteSelector" 
+                placeholder="a.next-page" 
+                class="form-input"
+                style="flex: 2;"
+              >
+            </div>
+            <div class="form-row" style="margin-top: 8px;">
+              <input 
+                type="number" 
+                id="navSiteDelay" 
+                placeholder="3" 
+                min="1"
+                max="30"
+                class="form-input"
+                style="flex: 1;"
+                value="3"
+              >
+              <label style="display: flex; align-items: center; gap: 8px; flex: 2; padding: 0 8px;">
+                <input type="checkbox" id="navSiteAutoStart" checked>
+                <span style="font-size: 13px;">Auto-start on new page</span>
+              </label>
+            </div>
+            <div class="form-row" style="margin-top: 8px;">
+              <input 
+                type="text" 
+                id="navSiteNotes" 
+                placeholder="Notes (optional)" 
+                class="form-input"
+                style="flex: 1;"
+              >
+              <button id="addNavConfig" class="btn-secondary">Add Configuration</button>
+            </div>
+            <div class="form-hint">
+              Enter hostname, CSS selector for "Next" button, delay (seconds), and optional notes
+            </div>
+            
+            <!-- Selector tester -->
+            <div class="selector-tester">
+              <button id="testSelector" class="btn-secondary">Test Selector on Current Page</button>
+              <div id="testResult" class="test-result"></div>
+            </div>
+          </div>
+          
+          <!-- List of configured sites -->
+          <div class="nav-configs-list" id="navConfigsList">
+            <!-- Populated dynamically with existing configurations -->
+          </div>
+
+          <!-- Help and examples -->
+          <div class="setting-hint" style="margin-top: 16px;">
+            <strong>Common CSS Selectors:</strong><br>
+            <code>a.next</code> - Link with class "next"<br>
+            <code>#next-button</code> - Element with ID "next-button"<br>
+            <code>a[rel="next"]</code> - Link with rel="next" attribute<br>
+            <code>.pagination > a:last-child</code> - Last link in pagination
+          </div>
+        </div>
+
+      </section>
+        
+        </div>
+      </div>
+      <!-- End Collapsible Section 4 -->
+        
     </div>
   </div>
 

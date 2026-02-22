@@ -1,12 +1,14 @@
 {
   "manifest_version": 2,
   "name": "Gesture AutoScroller",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "Mobile reading assistant with tap navigation and gesture-controlled autoscrolling to reduce hand strain",
 
   "permissions": [
     "storage",
-    "activeTab"
+    "activeTab",
+    "contextMenus",
+    "notifications"
   ],
 
   "content_scripts": [
