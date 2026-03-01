@@ -704,8 +704,13 @@
           activateAutoscroll();
           return;
         }
+      } else if (autoscroller.getState() === 'PAUSED') {
+        // If paused, two-finger tap resumes (same as single tap)
+        autoscroller.resume();
+        showToast('Resumed');
+        return;
       }
-      // If already autoscrolling, two-finger tap does nothing (use single tap to pause/resume)
+      // If already scrolling, two-finger tap does nothing
       return;
     }
     
@@ -1064,14 +1069,10 @@
       // Check if Wake Lock API is available
       if ('wakeLock' in navigator) {
         wakeLock = await navigator.wakeLock.request('screen');
-        console.log('Wake Lock acquired');
         
         // Re-acquire lock if it gets released (e.g., tab visibility change)
         wakeLock.addEventListener('release', () => {
-          console.log('Wake Lock released');
         });
-      } else {
-        console.log('Wake Lock API not supported');
       }
     } catch (err) {
       console.error(`Wake Lock error: ${err.name}, ${err.message}`);
@@ -1084,7 +1085,6 @@
       try {
         await wakeLock.release();
         wakeLock = null;
-        console.log('Wake Lock manually released');
       } catch (err) {
         console.error('Failed to release wake lock:', err);
       }
@@ -1246,9 +1246,12 @@
       this.currentSpeed = config.defaultSpeed;
       this.animationFrameId = null;
       this.lastScrollTime = 0;
-      this.accumulatedScroll = 0;
-      this.targetScrollPosition = 0; // For smooth scrolling approach
-      this.usesSmoothScroll = false; // Flag to track which method we're using
+      this.targetScrollPosition = 0; // Target scroll position for smooth scrolling
+      this.maxScrollTop = 0; // Cached max scroll position
+      this.lastMaxScrollCheck = 0; // Last time we refreshed maxScrollTop
+      
+      // Bind scroll method once to avoid creating new functions every frame
+      this.scroll = this.scroll.bind(this);
     }
     
     // Update config (for when settings change)
@@ -1347,17 +1350,15 @@
     // Start the scrolling animation loop using requestAnimationFrame
     startScrolling() {
       this.lastScrollTime = performance.now();
-      this.accumulatedScroll = 0;
       
-      // For low speeds, use smooth scroll with continuously updated target
-      this.usesSmoothScroll = this.currentSpeed < 60;
+      // Initialize target position to current scroll position
+      this.targetScrollPosition = window.pageYOffset || document.documentElement.scrollTop;
       
-      if (this.usesSmoothScroll) {
-        // Initialize target position to current scroll position
-        this.targetScrollPosition = window.pageYOffset || document.documentElement.scrollTop;
-      }
+      // Cache max scroll position
+      this.maxScrollTop = document.documentElement.scrollHeight - document.documentElement.clientHeight;
+      this.lastMaxScrollCheck = this.lastScrollTime;
       
-      this.animationFrameId = requestAnimationFrame(this.scroll.bind(this));
+      this.animationFrameId = requestAnimationFrame(this.scroll);
     }
     
     // Stop the scrolling animation loop
@@ -1375,13 +1376,6 @@
         return;
       }
       
-      // Check if we've reached the bottom of the page BEFORE scrolling
-      if (this.isAtBottom()) {
-        this.stop();
-        handleReachedBottom();
-        return;
-      }
-      
       // Calculate time elapsed since last scroll
       const deltaTime = timestamp - this.lastScrollTime;
       this.lastScrollTime = timestamp;
@@ -1390,43 +1384,32 @@
       // speed is in px/sec, deltaTime is in ms, so convert: (px/sec) * (ms / 1000)
       const pixelsThisFrame = (this.currentSpeed * deltaTime) / 1000;
       
-      if (this.usesSmoothScroll) {
-        // For low speeds: use smooth scrollTo with continuously advancing target
-        // This leverages browser's sub-pixel interpolation for smoother motion
-        this.targetScrollPosition += pixelsThisFrame;
-        
-        // Clamp target position to document bounds to prevent overscroll
-        // Use same calculation as isAtBottom() for consistency
-        const scrollHeight = document.documentElement.scrollHeight;
-        const clientHeight = document.documentElement.clientHeight;
-        const maxScrollTop = scrollHeight - clientHeight;
-        
-        // Clamp to maximum scroll position
-        this.targetScrollPosition = Math.min(this.targetScrollPosition, maxScrollTop);
-        
-        window.scrollTo({
-          top: this.targetScrollPosition,
-          left: 0,
-          behavior: 'auto'  // Use instant scroll - we're animating manually via RAF
-        });
-      } else {
-        // For higher speeds: use the accumulation method
-        this.accumulatedScroll += pixelsThisFrame;
-        
-        if (this.accumulatedScroll >= 1) {
-          const pixelsToScroll = Math.floor(this.accumulatedScroll);
-          this.accumulatedScroll -= pixelsToScroll;
-          
-          window.scrollBy({
-            top: pixelsToScroll,
-            left: 0,
-            behavior: 'auto'
-          });
-        }
+      // Advance target position
+      this.targetScrollPosition += pixelsThisFrame;
+      
+      // Refresh cached maxScrollTop every 500ms (handles lazy-loaded content, DOM changes)
+      if (timestamp - this.lastMaxScrollCheck > 500) {
+        this.maxScrollTop = document.documentElement.scrollHeight - document.documentElement.clientHeight;
+        this.lastMaxScrollCheck = timestamp;
       }
       
+      // Check if target has reached or exceeded bottom
+      if (this.targetScrollPosition >= this.maxScrollTop) {
+        this.targetScrollPosition = this.maxScrollTop;
+        window.scrollTo({ top: this.maxScrollTop, left: 0, behavior: 'auto' });
+        this.stop();
+        handleReachedBottom();
+        return;
+      }
+      
+      window.scrollTo({
+        top: this.targetScrollPosition,
+        left: 0,
+        behavior: 'auto'
+      });
+      
       // Continue animation loop
-      this.animationFrameId = requestAnimationFrame(this.scroll.bind(this));
+      this.animationFrameId = requestAnimationFrame(this.scroll);
     }
     
     // Check if we're at the bottom of the page
@@ -1458,84 +1441,78 @@
   // TOAST NOTIFICATIONS
   // ============================================================================
   
-  // Show toast message
+  // Show toast message (reuses single DOM element for performance)
   function showToast(message, duration = 1500) {
     // Safety check: ensure document.body exists
     if (!document.body) {
       return;
     }
     
-    // Remove existing toast and clear any pending timeout
-    hideToast();
-    
-    // Create toast element
-    toastElement = document.createElement('div');
-    toastElement.id = 'gesture-autoscroll-toast';
-    toastElement.textContent = message;
-    toastElement.style.cssText = `
-      position: fixed;
-      bottom: 20px;
-      left: 50%;
-      transform: translateX(-50%);
-      background: rgba(50, 50, 50, 0.95);
-      color: white;
-      padding: 12px 24px;
-      border-radius: 8px;
-      font-size: 14px;
-      font-weight: 500;
-      font-family: system-ui, -apple-system, sans-serif;
-      z-index: 2147483647;
-      pointer-events: none;
-      opacity: 0;
-      transition: opacity 0.3s ease;
-      box-shadow: 0 4px 12px rgba(0,0,0,0.3);
-    `;
-    
-    try {
-      document.body.appendChild(toastElement);
-      
-      // Fade in
-      requestAnimationFrame(() => {
-        if (toastElement) {
-          toastElement.style.opacity = '1';
-        }
-      });
-      
-      // Auto-hide after duration
-      toastTimeout = setTimeout(() => {
-        hideToast();
-      }, duration);
-    } catch (error) {
-      console.error('Failed to show toast:', error);
-      toastElement = null;
-    }
-  }
-  
-  // Hide toast
-  function hideToast() {
-    // Clear any pending timeout first
+    // Clear any pending hide timeout
     if (toastTimeout) {
       clearTimeout(toastTimeout);
       toastTimeout = null;
     }
     
-    // Then hide and remove the element
-    if (toastElement) {
+    // Create toast element if it doesn't exist or was removed from DOM
+    if (!toastElement || !toastElement.parentNode) {
+      toastElement = document.createElement('div');
+      toastElement.id = 'gesture-autoscroll-toast';
+      toastElement.style.cssText = `
+        position: fixed;
+        bottom: 20px;
+        left: 50%;
+        transform: translateX(-50%);
+        background: rgba(50, 50, 50, 0.95);
+        color: white;
+        padding: 12px 24px;
+        border-radius: 8px;
+        font-size: 14px;
+        font-weight: 500;
+        font-family: system-ui, -apple-system, sans-serif;
+        z-index: 2147483647;
+        pointer-events: none;
+        opacity: 0;
+        transition: opacity 0.3s ease;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+      `;
+      
       try {
-        toastElement.style.opacity = '0';
-        
-        const elementToRemove = toastElement;
-        toastElement = null; // Clear reference immediately
-        
-        setTimeout(() => {
-          if (elementToRemove && elementToRemove.parentNode) {
-            elementToRemove.parentNode.removeChild(elementToRemove);
-          }
-        }, 300);
+        document.body.appendChild(toastElement);
       } catch (error) {
-        console.error('Failed to hide toast:', error);
+        console.error('Failed to create toast:', error);
         toastElement = null;
+        return;
       }
+    }
+    
+    // Update message
+    toastElement.textContent = message;
+    
+    // Show toast (fade in)
+    requestAnimationFrame(() => {
+      if (toastElement) {
+        toastElement.style.opacity = '1';
+      }
+    });
+    
+    // Auto-hide after duration
+    toastTimeout = setTimeout(() => {
+      hideToast();
+    }, duration);
+  }
+  
+  // Hide toast (keeps element in DOM for reuse)
+  function hideToast() {
+    // Clear any pending timeout
+    if (toastTimeout) {
+      clearTimeout(toastTimeout);
+      toastTimeout = null;
+    }
+    
+    // Fade out (element stays in DOM for reuse)
+    if (toastElement) {
+      toastElement.style.opacity = '0';
     }
   }
   
@@ -1563,22 +1540,18 @@
   
   // Activate element picker mode
   function activateElementPicker() {
-    console.log('activateElementPicker called, current state:', elementPickerActive);
     
     if (elementPickerActive) {
-      console.log('Picker already active, ignoring');
       return;
     }
     
     elementPickerActive = true;
     pickerReadyToSelect = false; // Not ready yet - need to wait for activation touches to clear
-    console.log('Setting elementPickerActive to true');
     
     // Notify background script that element picking has started
     browser.runtime.sendMessage({
       action: 'startElementPicking'
     }).catch(error => {
-      console.log('Failed to notify background of element picking start:', error);
       // Continue anyway - the background script now accepts elementPicked without this flag
     });
     
@@ -1586,8 +1559,6 @@
     if (toastElement) {
       toastElement.style.display = 'none';
     }
-    
-    console.log('Creating picker UI elements');
     
     // Create highlight box first (under overlay)
     pickerHighlight = document.createElement('div');
@@ -1664,7 +1635,6 @@
     // Wait for 500ms before allowing selection (prevents immediate selection from activation gesture)
     setTimeout(() => {
       pickerReadyToSelect = true;
-      console.log('Picker ready to select elements');
     }, 500);
     
     // Cancel button handler
@@ -1809,8 +1779,6 @@
       href: pickerTarget.href || ''
     };
     
-    console.log('Element picked:', elementInfo);
-    
     // Deactivate picker
     deactivateElementPicker();
     
@@ -1819,7 +1787,6 @@
       action: 'elementPicked',
       elementInfo: elementInfo
     }).then(response => {
-      console.log('Element picked message sent, response:', response);
     }).catch(error => {
       console.error('Failed to send element picked message:', error);
     });
@@ -1834,7 +1801,6 @@
     
     // Don't process selection if picker isn't ready yet (prevents immediate selection from activation gesture)
     if (!pickerReadyToSelect) {
-      console.log('Picker not ready to select yet, ignoring touch');
       event.preventDefault();
       event.stopPropagation();
       return;
@@ -1994,10 +1960,8 @@
       return true;
     } else if (message.action === 'activateElementPicker') {
       // Activate element picker mode
-      console.log('Received activateElementPicker message');
       try {
         activateElementPicker();
-        console.log('Element picker activated');
         sendResponse({ success: true });
       } catch (error) {
         console.error('Failed to activate element picker:', error);

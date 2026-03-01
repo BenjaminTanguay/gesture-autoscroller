@@ -57,17 +57,13 @@ function setupCollapsibleSections() {
 // Check for picked element in storage
 async function checkForPickedElement() {
   try {
-    console.log('Checking for picked element in storage...');
     const result = await browser.storage.local.get(['pickedElement', 'pickedElementTimestamp']);
-    console.log('Storage result:', result);
     
     if (result.pickedElement && result.pickedElementTimestamp) {
       // Check if it's recent (within last 30 seconds)
       const age = Date.now() - result.pickedElementTimestamp;
-      console.log('Picked element age (ms):', age);
       
       if (age < 30000) {
-        console.log('Processing picked element:', result.pickedElement);
         // Process the picked element
         await handleElementPicked({
           action: 'elementPicked',
@@ -76,15 +72,11 @@ async function checkForPickedElement() {
         
         // Clear from storage
         await browser.storage.local.remove(['pickedElement', 'pickedElementTimestamp']);
-        console.log('Cleared picked element from storage');
         return true; // Found and processed a picked element
       } else {
-        console.log('Picked element too old, ignoring');
         // Clear old picked element
         await browser.storage.local.remove(['pickedElement', 'pickedElementTimestamp']);
       }
-    } else {
-      console.log('No picked element in storage');
     }
     return false; // No picked element found
   } catch (error) {
@@ -95,8 +87,6 @@ async function checkForPickedElement() {
 
 // Initialize the options page
 document.addEventListener('DOMContentLoaded', async () => {
-  console.log('=== Options page DOMContentLoaded ===');
-  
   // Cache DOM elements
   cacheElements();
   
@@ -173,7 +163,6 @@ document.addEventListener('DOMContentLoaded', async () => {
   // This handles when user switches back to the settings tab
   document.addEventListener('visibilitychange', async () => {
     if (!document.hidden) {
-      console.log('Settings page became visible, re-checking domain selection');
       await autoSelectCurrentTabDomain();
       updateUI();
     }
@@ -181,7 +170,6 @@ document.addEventListener('DOMContentLoaded', async () => {
   
   // Also listen for window focus events
   window.addEventListener('focus', async () => {
-    console.log('Settings page gained focus, re-checking domain selection');
     await autoSelectCurrentTabDomain();
     updateUI();
   });
@@ -257,6 +245,10 @@ function cacheElements() {
     // Sections
     autoStartSection: document.getElementById('autoStartSection'),
     
+    // Auto-navigate elements
+    autoNavigateDelay: document.getElementById('autoNavigateDelay'),
+    autoNavigateDelayValue: document.getElementById('autoNavigateDelayValue'),
+    
     // Whitelist
     whitelistList: document.getElementById('whitelistList'),
     hostInput: document.getElementById('hostInput'),
@@ -310,74 +302,56 @@ async function loadSettings() {
 // Auto-select current tab's domain if it's whitelisted
 async function autoSelectCurrentTabDomain() {
   try {
-    console.log('=== Auto-selecting current tab domain ===');
-    console.log('Current whitelist:', whitelist);
-    console.log('Timestamp:', new Date().toISOString());
-    
     // Strategy 1: Ask background script for the last active tab (most reliable)
     try {
       const response = await browser.runtime.sendMessage({ action: 'getLastActiveTab' });
-      console.log('Last active tab from background:', response);
       
       if (response && response.success && response.tabInfo) {
         const tabInfo = response.tabInfo;
         const host = tabInfo.hostname;
         const whitelistedHost = findWhitelistedHost(host);
         
-        console.log('Found whitelisted host from background tracker:', whitelistedHost);
         if (whitelistedHost) {
           await switchToDomain(whitelistedHost);
-          console.log('Switched to domain:', whitelistedHost);
           return;
         } else {
           // Host exists but not whitelisted - switch to default
-          console.log('Last active tab is not whitelisted, switching to default');
           await switchToDomain('__default__');
           return;
         }
       }
     } catch (e) {
-      console.log('Could not get last active tab from background:', e);
     }
     
     // Strategy 2: Try to get the opener tab (tab that opened this options page)
     const currentTab = await browser.tabs.getCurrent();
-    console.log('Current tab:', currentTab);
     
     if (currentTab && currentTab.openerTabId) {
       try {
         const openerTab = await browser.tabs.get(currentTab.openerTabId);
-        console.log('Opener tab:', openerTab);
         if (openerTab && openerTab.url) {
           const url = new URL(openerTab.url);
-          console.log('Opener tab URL:', url.href, 'hostname:', url.hostname);
           // Skip extension and special URLs
           if (!url.protocol.startsWith('moz-extension') && 
               !url.protocol.startsWith('about') &&
               !url.protocol.startsWith('chrome')) {
             const host = url.hostname;
             const whitelistedHost = findWhitelistedHost(host);
-            console.log('Found whitelisted host from opener:', whitelistedHost);
             if (whitelistedHost) {
               await switchToDomain(whitelistedHost);
-              console.log('Switched to domain:', whitelistedHost);
               return;
             } else {
-              console.log('Opener tab is not whitelisted, switching to default');
               await switchToDomain('__default__');
               return;
             }
           }
         }
       } catch (e) {
-        console.log('Could not get opener tab:', e);
       }
     }
     
     // Strategy 3: Find the most recently accessed non-settings tab (fallback)
-    console.log('Trying strategy 3: finding most recent tab with lastAccessed');
     const allTabs = await browser.tabs.query({});
-    console.log('All tabs count:', allTabs.length);
     
     // Get current tab ID to exclude it
     const settingsTabId = currentTab ? currentTab.id : null;
@@ -400,12 +374,6 @@ async function autoSelectCurrentTabDomain() {
       })
       .sort((a, b) => (b.lastAccessed || 0) - (a.lastAccessed || 0));
     
-    console.log('Candidate tabs (sorted by lastAccessed):', candidateTabs.map(t => ({
-      url: t.url,
-      lastAccessed: t.lastAccessed,
-      id: t.id
-    })));
-    
     // Try to find a whitelisted tab, checking in order of most recently accessed
     for (const tab of candidateTabs) {
       const url = new URL(tab.url);
@@ -413,24 +381,16 @@ async function autoSelectCurrentTabDomain() {
       const whitelistedHost = findWhitelistedHost(host);
       
       if (whitelistedHost) {
-        console.log('Found whitelisted host:', whitelistedHost, 'from tab:', tab.url);
         await switchToDomain(whitelistedHost);
         return;
       }
     }
     
-    // If we found tabs but none were whitelisted
-    if (candidateTabs.length > 0) {
-      console.log('Found tabs but none are whitelisted, switching to default');
-    }
-    
-    console.log('No whitelisted domain found, switching to default');
     // Switch to default if no whitelisted domain was found
     await switchToDomain('__default__');
     
   } catch (error) {
     // If there's an error, just stay with default selection
-    console.log('Could not auto-select domain:', error);
     await switchToDomain('__default__');
   }
 }
@@ -454,7 +414,6 @@ function findWhitelistedHost(host) {
 
 // Helper: Switch to a domain's configuration
 async function switchToDomain(hostname) {
-  console.log('Switching to domain:', hostname);
   currentDomain = hostname;
   
   // Get the appropriate config
@@ -476,8 +435,6 @@ async function switchToDomain(hostname) {
   selectors.forEach(selector => {
     selector.value = hostname;
   });
-  
-  console.log('Current domain is now:', currentDomain);
 }
 
 // Setup domain selector synchronization across all tabs
@@ -1006,13 +963,7 @@ function renderNavigationSelector() {
   const navSiteSelector = document.getElementById('navSiteSelector');
   const navSiteNotes = document.getElementById('navSiteNotes');
   
-  console.log('renderNavigationSelector called');
-  console.log('  navSiteSelector element:', !!navSiteSelector);
-  console.log('  navSiteNotes element:', !!navSiteNotes);
-  console.log('  currentConfig.navigationSelector:', currentConfig.navigationSelector);
-  
   if (!navSiteSelector || !navSiteNotes) {
-    console.log('  Skipping - elements not found');
     return;
   }
   
@@ -1022,12 +973,9 @@ function renderNavigationSelector() {
   if (selector) {
     navSiteSelector.value = selector.selector || '';
     navSiteNotes.value = selector.notes || '';
-    console.log('  Set selector to:', navSiteSelector.value);
-    console.log('  Set notes to:', navSiteNotes.value);
   } else {
     navSiteSelector.value = '';
     navSiteNotes.value = '';
-    console.log('  No selector in config, cleared fields');
   }
 }
 
@@ -1094,16 +1042,39 @@ function updateZoneSplitPreview() {
   const downPercentage = 100 - upPercentage;
   const layout = elements.tapZoneLayoutHorizontal.checked ? 'horizontal' : 'vertical';
   
-  elements.zoneSplitPreview.innerHTML = `
-    <div class="zone-split-container ${layout}">
-      <div class="zone up-zone" style="${layout === 'vertical' ? 'height' : 'width'}: ${upPercentage}%">
-        UP<br>${upPercentage}%
-      </div>
-      <div class="zone down-zone" style="${layout === 'vertical' ? 'height' : 'width'}: ${downPercentage}%">
-        DOWN<br>${downPercentage}%
-      </div>
-    </div>
-  `;
+  // Clear existing content
+  while (elements.zoneSplitPreview.firstChild) {
+    elements.zoneSplitPreview.removeChild(elements.zoneSplitPreview.firstChild);
+  }
+  
+  // Create container
+  const container = document.createElement('div');
+  container.className = `zone-split-container ${layout}`;
+  
+  // Create up zone
+  const upZone = document.createElement('div');
+  upZone.className = 'zone up-zone';
+  upZone.style[layout === 'vertical' ? 'height' : 'width'] = `${upPercentage}%`;
+  upZone.textContent = 'UP';
+  const upBr = document.createElement('br');
+  const upPercent = document.createTextNode(`${upPercentage}%`);
+  upZone.appendChild(upBr);
+  upZone.appendChild(upPercent);
+  
+  // Create down zone
+  const downZone = document.createElement('div');
+  downZone.className = 'zone down-zone';
+  downZone.style[layout === 'vertical' ? 'height' : 'width'] = `${downPercentage}%`;
+  downZone.textContent = 'DOWN';
+  const downBr = document.createElement('br');
+  const downPercent = document.createTextNode(`${downPercentage}%`);
+  downZone.appendChild(downBr);
+  downZone.appendChild(downPercent);
+  
+  // Assemble and append
+  container.appendChild(upZone);
+  container.appendChild(downZone);
+  elements.zoneSplitPreview.appendChild(container);
   
   elements.zoneSplitDescription.textContent = 
     `Scroll-up: ${upPercentage}%, Scroll-down: ${downPercentage}%`;
@@ -1316,10 +1287,6 @@ function initAutoNavigate() {
   const hostname = urlParams.get('hostname');
   
   if (selector && hostname) {
-    console.log('=== URL parameters detected (right-click method) ===');
-    console.log('Selector:', selector);
-    console.log('Hostname:', hostname);
-    
     // Use the same handleElementPicked flow for consistency
     handleElementPicked({
       action: 'elementPicked',
@@ -1328,7 +1295,6 @@ function initAutoNavigate() {
         hostname: hostname
       }
     }).then(() => {
-      console.log('URL parameters processed successfully');
       // Clear the URL parameters
       const newUrl = window.location.pathname;
       window.history.replaceState({}, document.title, newUrl);
@@ -1509,9 +1475,6 @@ function initAutoNavigate() {
 // Handle element picked message
 async function handleElementPicked(message) {
   if (message.action === 'elementPicked') {
-    console.log('=== handleElementPicked called ===');
-    console.log('Message:', JSON.stringify(message, null, 2));
-    
     // Element was picked, fill in the form
     const elementInfo = message.elementInfo;
     
@@ -1524,16 +1487,9 @@ async function handleElementPicked(message) {
     const hostname = elementInfo.hostname;
     const selector = elementInfo.selector;
     
-    console.log('Element hostname:', hostname);
-    console.log('Element selector:', selector);
-    console.log('Current domain:', currentDomain);
-    console.log('Whitelist:', whitelist);
-    
     // If hostname is in whitelist but not currently selected, switch to it
     if (whitelist.includes(hostname) && currentDomain !== hostname) {
-      console.log('Need to switch to domain:', hostname);
       await switchToDomain(hostname);
-      console.log('Switched to domain:', currentDomain);
     } else if (!whitelist.includes(hostname)) {
       console.warn('Hostname not in whitelist:', hostname);
       showStatusMessage(`Warning: ${hostname} is not whitelisted. Add it to the whitelist first.`, 'error', 5000);
@@ -1541,36 +1497,28 @@ async function handleElementPicked(message) {
     }
     
     // Update the current config's navigationSelector BEFORE switching tabs
-    console.log('Updating currentConfig.navigationSelector');
     if (!currentConfig.navigationSelector) {
       currentConfig.navigationSelector = {};
     }
     currentConfig.navigationSelector.selector = selector;
-    console.log('Updated config:', currentConfig.navigationSelector);
     
     // Switch to the Auto-Navigate tab
     const autonavigateTab = document.querySelector('.tab[data-tab="autonavigate"]');
-    console.log('Auto-Navigate tab found:', !!autonavigateTab);
     
     if (autonavigateTab) {
-      console.log('Clicking Auto-Navigate tab');
       autonavigateTab.click();
       
       // Wait for tab to render
       await new Promise(resolve => setTimeout(resolve, 100));
-      console.log('Tab should be visible now');
     } else {
       console.error('Auto-Navigate tab not found in DOM');
     }
     
     // Now update the UI which will populate the selector field
-    console.log('Calling updateUI()');
     updateUI();
     
     // Verify the field was populated
     const navSiteSelector = document.getElementById('navSiteSelector');
-    console.log('navSiteSelector element:', navSiteSelector);
-    console.log('navSiteSelector value:', navSiteSelector?.value);
     
     if (navSiteSelector) {
       // If value is still empty, set it directly as a fallback
@@ -1580,20 +1528,17 @@ async function handleElementPicked(message) {
       }
       
       // Save the config directly (don't use debouncedAutoSave which reads from UI)
-      console.log('Saving config directly');
       await saveCurrentConfig();
       
       // Scroll to the selector section
       setTimeout(() => {
         const selectorSection = document.querySelector('.element-picker-section');
         if (selectorSection) {
-          console.log('Scrolling to selector section');
           selectorSection.scrollIntoView({ behavior: 'smooth', block: 'center' });
         }
       }, 200);
       
       showStatusMessage('Element captured and saved!', 'success', 5000);
-      console.log('=== handleElementPicked completed successfully ===');
     } else {
       console.error('navSiteSelector not found in DOM after tab switch');
       showStatusMessage('Error: Could not find selector field', 'error');

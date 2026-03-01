@@ -1,4 +1,4 @@
-# Version 1.2.0 - Features & Fixes Documentation
+# Version 2.0.0 - Features & Fixes Documentation
 
 **Release Date**: TBD  
 **Last Updated**: February 22, 2026
@@ -7,7 +7,7 @@
 
 ## Overview
 
-Version 1.2.0 focuses on improving the mobile reading experience by addressing interaction issues and adding more flexible tap zone configuration options. This version includes critical bug fixes for Android text selection conflicts and screen timeout issues, along with enhanced user customization features and UX improvements.
+Version 2.0.0 focuses on improving the mobile reading experience by addressing interaction issues and adding more flexible tap zone configuration options. This version includes critical bug fixes for Android text selection conflicts and screen timeout issues, along with enhanced user customization features and UX improvements.
 
 ---
 

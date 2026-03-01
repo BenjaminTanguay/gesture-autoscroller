@@ -20,7 +20,6 @@ browser.tabs.onActivated.addListener(async (activeInfo) => {
           hostname: url.hostname,
           timestamp: Date.now()
         };
-        console.log('Tracked active tab:', lastActiveTabInfo);
       }
     }
   } catch (e) {
@@ -40,7 +39,6 @@ browser.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
           hostname: url.hostname,
           timestamp: Date.now()
         };
-        console.log('Tracked updated active tab:', lastActiveTabInfo);
       }
     } catch (e) {
       // Ignore errors
@@ -94,9 +92,7 @@ browser.runtime.onInstalled.addListener(async (details) => {
     const needsMigration = await checkNeedsMigration();
     
     if (needsMigration) {
-      console.log('Migrating to per-domain configuration...');
       await migrateToPerDomainConfig();
-      console.log('Migration complete!');
     } else {
       // Check if this is first install
       const result = await browser.storage.local.get('gesture_autoscroller_metadata');
@@ -169,8 +165,6 @@ async function migrateToPerDomainConfig() {
     
     // Remove old settings key
     await browser.storage.local.remove('gesture_autoscroller_settings');
-    
-    console.log(`Migrated ${whitelist.length} domain(s) to per-domain configuration`);
   } catch (error) {
     console.error('Migration failed:', error);
     throw error;
@@ -219,8 +213,6 @@ async function initializeDefaultStorage() {
       gesture_autoscroller_domain_configs: {},
       gesture_autoscroller_whitelist: []
     });
-    
-    console.log('Initialized default storage');
   } catch (error) {
     console.error('Failed to initialize default storage:', error);
     throw error;
@@ -229,11 +221,6 @@ async function initializeDefaultStorage() {
 
 // Log state changes
 function setPickingState(value, reason) {
-  console.log('==========================================');
-  console.log('CHANGING isPickingElement:', isPickingElement, '->', value);
-  console.log('Reason:', reason);
-  console.log('Stack trace:', new Error().stack);
-  console.log('==========================================');
   isPickingElement = value;
 }
 
@@ -309,37 +296,20 @@ browser.runtime.onMessage.addListener(async (message, sender) => {
       
     case 'elementPicked':
       // Element was picked, forward to all options pages
-      console.log('==========================================');
-      console.log('BACKGROUND RECEIVED elementPicked');
-      console.log('Message:', message);
-      console.log('isPickingElement:', isPickingElement);
-      console.log('==========================================');
-      
-      // Optional: Show notification (can be disabled if annoying)
-      // browser.notifications.create({
-      //   type: 'basic',
-      //   title: 'Element Picked',
-      //   message: 'Picked: ' + (message.elementInfo ? message.elementInfo.selector : 'unknown'),
-      //   iconUrl: browser.runtime.getURL('icons/icon-48.png')
-      // }).catch(err => console.log('Notification failed:', err));
       
       // Allow elementPicked even if not explicitly in picking mode
       // This supports 4-finger gesture and right-click methods that don't set the flag
       if (!isPickingElement) {
-        console.log('NOT IN PICKING MODE - but accepting anyway (4-finger gesture or direct activation)');
       } else {
-        console.log('IN PICKING MODE - resetting state');
         setPickingState(false, 'Element picked, resetting state');
       }
       
       // FALLBACK: Store in local storage so options page can pick it up
-      console.log('Storing picked element in local storage as fallback');
       try {
         await browser.storage.local.set({
           pickedElement: message.elementInfo,
           pickedElementTimestamp: Date.now()
         });
-        console.log('Stored in local storage successfully');
       } catch (error) {
         console.error('Failed to store in local storage:', error);
       }
@@ -347,11 +317,9 @@ browser.runtime.onMessage.addListener(async (message, sender) => {
       try {
         // Try to find options page using extension views (works for both tabs and popups)
         const views = browser.extension.getViews({ type: 'popup' });
-        console.log('Found', views.length, 'popup views');
         
         // Also check for tab views
         const tabViews = browser.extension.getViews({ type: 'tab' });
-        console.log('Found', tabViews.length, 'tab views');
         
         const allViews = [...views, ...tabViews];
         
@@ -361,7 +329,6 @@ browser.runtime.onMessage.addListener(async (message, sender) => {
           try {
             // Check if this view has our message handler
             if (view.location && view.location.href && view.location.href.includes('options.html')) {
-              console.log('Found options view, dispatching message');
               // Dispatch message directly to the view
               if (view.browser && view.browser.runtime) {
                 // Trigger the message handler by dispatching a custom event
@@ -369,7 +336,6 @@ browser.runtime.onMessage.addListener(async (message, sender) => {
                   detail: message
                 });
                 view.document.dispatchEvent(event);
-                console.log('Dispatched custom event to options view');
                 forwarded = true;
               }
             }
@@ -378,20 +344,13 @@ browser.runtime.onMessage.addListener(async (message, sender) => {
           }
         }
         
-        if (!forwarded) {
-          console.error('Could not forward message to any options view');
-        }
-        
         // Also try the tab approach as fallback
         const allTabs = await browser.tabs.query({});
         const optionsTabs = allTabs.filter(t => t.url && t.url.includes('options.html'));
-        console.log('Found', optionsTabs.length, 'options tabs');
         
         for (const tab of optionsTabs) {
           try {
-            console.log('Sending message to tab', tab.id);
             await browser.tabs.sendMessage(tab.id, message);
-            console.log('Message sent to tab', tab.id);
             forwarded = true;
           } catch (error) {
             console.error('Failed to send message to tab', tab.id, ':', error);
